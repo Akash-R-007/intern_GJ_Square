@@ -1,4 +1,5 @@
 #code for model building and training using the FER-2013 dataset
+#change runtime to GPU in google colab
 
 from google.colab import drive
 drive.mount('/content/drive')
