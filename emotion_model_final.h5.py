@@ -1,4 +1,4 @@
-// code for model building and training using the FER-2013 dataset
+#code for model building and training using the FER-2013 dataset
 
 from google.colab import drive
 drive.mount('/content/drive')
