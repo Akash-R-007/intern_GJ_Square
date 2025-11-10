@@ -1,13 +1,13 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { Send, Bot, User, Loader2, Sparkles } from 'lucide-react';
+import { Send, Bot, User, Loader2, Sparkles, Globe, Calendar } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 
 interface Message {
   role: 'user' | 'bot';
   content: string;
-  timestamp: Date;
+  timestamp: string;
 }
 
 export default function OnboardingPage() {
@@ -17,8 +17,9 @@ export default function OnboardingPage() {
   const [onboardingStarted, setOnboardingStarted] = useState(false);
   const [onboardingCompleted, setOnboardingCompleted] = useState(false);
   const [currentQuestion, setCurrentQuestion] = useState(1);
-  const [totalQuestions, setTotalQuestions] = useState(5);
+  const [totalQuestions, setTotalQuestions] = useState(6);
   const [userId, setUserId] = useState<string>('');
+  const [currentUtcTime, setCurrentUtcTime] = useState<string>('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const API_BASE_URL = 'http://localhost:5000/api/chatbot';
@@ -31,7 +32,19 @@ export default function OnboardingPage() {
     scrollToBottom();
   }, [messages]);
 
-  // Get user ID from Supabase auth
+  // Update UTC time every second
+  useEffect(() => {
+    const updateTime = () => {
+      const now = new Date();
+      setCurrentUtcTime(now.toISOString());
+    };
+    
+    updateTime();
+    const interval = setInterval(updateTime, 1000);
+    
+    return () => clearInterval(interval);
+  }, []);
+
   useEffect(() => {
     const getUserId = async () => {
       const { data: { session } } = await supabase.auth.getSession();
@@ -45,6 +58,7 @@ export default function OnboardingPage() {
 
   const startOnboarding = async (uid: string) => {
     try {
+      // ✅ FIXED: Correct fetch syntax
       const response = await fetch(`${API_BASE_URL}/start`, {
         method: 'POST',
         headers: {
@@ -66,7 +80,7 @@ export default function OnboardingPage() {
           {
             role: 'bot',
             content: data.question,
-            timestamp: new Date(),
+            timestamp: data.timestamp,
           },
         ]);
       }
@@ -76,9 +90,33 @@ export default function OnboardingPage() {
         {
           role: 'bot',
           content: "Sorry, I'm having trouble connecting. Please try again later.",
-          timestamp: new Date(),
+          timestamp: new Date().toISOString(),
         },
       ]);
+    }
+  };
+
+  const formatUtcTime = (isoString: string) => {
+    try {
+      const date = new Date(isoString);
+      const hours = date.getUTCHours().toString().padStart(2, '0');
+      const minutes = date.getUTCMinutes().toString().padStart(2, '0');
+      const seconds = date.getUTCSeconds().toString().padStart(2, '0');
+      return `${hours}:${minutes}:${seconds} UTC`;
+    } catch (error) {
+      return '';
+    }
+  };
+
+  const formatUtcDate = (isoString: string) => {
+    try {
+      const date = new Date(isoString);
+      const day = date.getUTCDate().toString().padStart(2, '0');
+      const month = (date.getUTCMonth() + 1).toString().padStart(2, '0');
+      const year = date.getUTCFullYear();
+      return `${day}/${month}/${year}`;
+    } catch (error) {
+      return '';
     }
   };
 
@@ -88,7 +126,7 @@ export default function OnboardingPage() {
     const userMessage: Message = {
       role: 'user',
       content: inputValue,
-      timestamp: new Date(),
+      timestamp: new Date().toISOString(),
     };
 
     setMessages((prev) => [...prev, userMessage]);
@@ -97,7 +135,7 @@ export default function OnboardingPage() {
 
     try {
       if (!onboardingCompleted) {
-        // Handle onboarding flow
+        // ✅ FIXED: Correct fetch syntax
         const response = await fetch(`${API_BASE_URL}/answer`, {
           method: 'POST',
           headers: {
@@ -113,36 +151,33 @@ export default function OnboardingPage() {
 
         if (data.success) {
           if (data.completed) {
-            // Onboarding completed
             setOnboardingCompleted(true);
             setMessages((prev) => [
               ...prev,
               {
                 role: 'bot',
                 content: `🎉 ${data.summary}\n\nYour onboarding is complete! Redirecting to dashboard...`,
-                timestamp: new Date(),
+                timestamp: data.timestamp,
               },
             ]);
             
-            // Redirect to dashboard after 3 seconds
             setTimeout(() => {
               window.location.href = '/dashboard';
             }, 3000);
           } else {
-            // Next question
             setCurrentQuestion(data.question_number);
             setMessages((prev) => [
               ...prev,
               {
                 role: 'bot',
                 content: data.question,
-                timestamp: new Date(),
+                timestamp: data.timestamp,
               },
             ]);
           }
         }
       } else {
-        // Handle general chat after onboarding
+        // ✅ FIXED: Correct fetch syntax
         const response = await fetch(`${API_BASE_URL}/chat`, {
           method: 'POST',
           headers: {
@@ -150,6 +185,7 @@ export default function OnboardingPage() {
           },
           body: JSON.stringify({
             message: inputValue,
+            user_id: userId,
           }),
         });
 
@@ -161,7 +197,7 @@ export default function OnboardingPage() {
             {
               role: 'bot',
               content: data.response,
-              timestamp: new Date(),
+              timestamp: data.timestamp,
             },
           ]);
         }
@@ -173,7 +209,7 @@ export default function OnboardingPage() {
         {
           role: 'bot',
           content: 'Sorry, something went wrong. Please try again.',
-          timestamp: new Date(),
+          timestamp: new Date().toISOString(),
         },
       ]);
     } finally {
@@ -193,13 +229,26 @@ export default function OnboardingPage() {
       <div className="w-full max-w-4xl h-[90vh] bg-white rounded-2xl shadow-2xl flex flex-col overflow-hidden">
         {/* Header */}
         <div className="bg-gradient-to-r from-purple-600 to-blue-600 p-6 text-white">
-          <div className="flex items-center gap-3 mb-2">
-            <div className="bg-white/20 p-2 rounded-xl backdrop-blur-sm">
-              <Sparkles className="w-6 h-6" />
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-3">
+              <div className="bg-white/20 p-2 rounded-xl backdrop-blur-sm">
+                <Sparkles className="w-6 h-6" />
+              </div>
+              <div>
+                <h1 className="text-2xl font-bold">Emotion Companion</h1>
+                <p className="text-purple-100 text-sm">Your personal wellbeing assistant</p>
+              </div>
             </div>
-            <div>
-              <h1 className="text-2xl font-bold">Emotion Companion</h1>
-              <p className="text-purple-100 text-sm">Your personal wellbeing assistant</p>
+            
+            {/* UTC Time Display */}
+            <div className="bg-white/10 backdrop-blur-sm rounded-lg px-4 py-2">
+              <div className="flex items-center gap-2 text-sm">
+                <Globe className="w-4 h-4" />
+                <div className="text-right">
+                  <div className="font-mono font-semibold">{formatUtcTime(currentUtcTime)}</div>
+                  <div className="text-xs text-purple-100">{formatUtcDate(currentUtcTime)}</div>
+                </div>
+              </div>
             </div>
           </div>
           
@@ -220,7 +269,7 @@ export default function OnboardingPage() {
         </div>
 
         {/* Messages Container */}
-        <div className="flex-1 overflow-y-auto p-6 space-y-4">
+        <div className="flex-1 overflow-y-auto p-6 space-y-4 bg-gradient-to-b from-gray-50 to-white">
           {messages.map((message, index) => (
             <div
               key={index}
@@ -230,7 +279,7 @@ export default function OnboardingPage() {
             >
               {/* Avatar */}
               <div
-                className={`flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center ${
+                className={`flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center shadow-lg ${
                   message.role === 'user'
                     ? 'bg-gradient-to-br from-purple-500 to-pink-500'
                     : 'bg-gradient-to-br from-blue-500 to-purple-500'
@@ -250,33 +299,36 @@ export default function OnboardingPage() {
                 }`}
               >
                 <div
-                  className={`rounded-2xl px-5 py-3 ${
+                  className={`rounded-2xl px-5 py-3 shadow-md ${
                     message.role === 'user'
                       ? 'bg-gradient-to-br from-purple-500 to-pink-500 text-white'
-                      : 'bg-gray-100 text-gray-800'
+                      : 'bg-white text-gray-800 border border-gray-200'
                   }`}
                 >
                   <p className="text-sm leading-relaxed whitespace-pre-wrap">
                     {message.content}
                   </p>
                 </div>
-                <span className="text-xs text-gray-400 mt-1 px-2">
-                  {message.timestamp.toLocaleTimeString([], {
-                    hour: '2-digit',
-                    minute: '2-digit',
-                  })}
-                </span>
+                <div className="flex items-center gap-1 mt-1 px-2">
+                  <Calendar className="w-3 h-3 text-gray-400" />
+                  <span className="text-xs text-gray-400">
+                    {formatUtcTime(message.timestamp)}
+                  </span>
+                </div>
               </div>
             </div>
           ))}
 
           {isLoading && (
             <div className="flex gap-3">
-              <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center">
+              <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center shadow-lg">
                 <Bot className="w-5 h-5 text-white" />
               </div>
-              <div className="bg-gray-100 rounded-2xl px-5 py-3">
-                <Loader2 className="w-5 h-5 text-gray-500 animate-spin" />
+              <div className="bg-white rounded-2xl px-5 py-3 border border-gray-200 shadow-md">
+                <div className="flex items-center gap-2">
+                  <Loader2 className="w-5 h-5 text-gray-500 animate-spin" />
+                  <span className="text-sm text-gray-500">Thinking...</span>
+                </div>
               </div>
             </div>
           )}
@@ -285,16 +337,20 @@ export default function OnboardingPage() {
         </div>
 
         {/* Input Area */}
-        <div className="border-t border-gray-200 p-4 bg-gray-50">
+        <div className="border-t border-gray-200 p-4 bg-white">
           <div className="flex gap-3">
             <input
               type="text"
               value={inputValue}
               onChange={(e) => setInputValue(e.target.value)}
               onKeyPress={handleKeyPress}
-              placeholder="Type your message..."
+              placeholder={
+                onboardingCompleted 
+                  ? "Onboarding complete! Redirecting..." 
+                  : "Type your answer here..."
+              }
               disabled={isLoading || onboardingCompleted}
-              className="flex-1 px-5 py-3 rounded-xl border border-gray-300 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent disabled:bg-gray-100 disabled:cursor-not-allowed transition-all text-gray-900"
+              className="flex-1 px-5 py-3 rounded-xl border-2 border-gray-200 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent disabled:bg-gray-100 disabled:cursor-not-allowed transition-all text-gray-900 placeholder-gray-400"
             />
             <button
               onClick={handleSendMessage}
@@ -304,9 +360,15 @@ export default function OnboardingPage() {
               <Send className="w-5 h-5" />
             </button>
           </div>
-          <p className="text-xs text-gray-500 mt-2 text-center">
-            Press Enter to send • Shift + Enter for new line
-          </p>
+          <div className="flex items-center justify-between mt-2">
+            <p className="text-xs text-gray-500">
+              Press Enter to send • Shift + Enter for new line
+            </p>
+            <p className="text-xs text-gray-400 flex items-center gap-1">
+              <Globe className="w-3 h-3" />
+              All times in UTC
+            </p>
+          </div>
         </div>
       </div>
     </div>
