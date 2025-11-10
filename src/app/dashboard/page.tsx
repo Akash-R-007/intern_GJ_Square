@@ -16,7 +16,10 @@ import {
   TrendingUp,
   Loader2,
   Video,
-  VideoOff
+  VideoOff,
+  ExternalLink,
+  Star,
+  AlertCircle
 } from 'lucide-react';
 
 interface EmotionData {
@@ -30,8 +33,39 @@ interface ChatMessage {
   content: string;
 }
 
+interface MusicRecommendation {
+  id: string;
+  name: string;
+  description: string;
+  image: string | null;
+  url: string;
+  tracks: number;
+}
+
+interface MovieRecommendation {
+  id: number;
+  title: string;
+  description: string;
+  image: string | null;
+  rating: number;
+  release_date: string;
+  url: string;
+}
+
+interface BookRecommendation {
+  id: string;
+  title: string;
+  authors: string[];
+  description: string;
+  image: string | null;
+  rating: number;
+  categories: string[];
+  url: string;
+}
+
 export default function DashboardPage() {
   const [userId, setUserId] = useState<string>('');
+  const [isUserLoaded, setIsUserLoaded] = useState(false);
   const [currentEmotion, setCurrentEmotion] = useState<EmotionData | null>(null);
   const [isDetecting, setIsDetecting] = useState(false);
   const [isChatOpen, setIsChatOpen] = useState(false);
@@ -39,12 +73,21 @@ export default function DashboardPage() {
   const [chatInput, setChatInput] = useState('');
   const [isChatLoading, setIsChatLoading] = useState(false);
   const [emotionHistory, setEmotionHistory] = useState<EmotionData[]>([]);
+  const [error, setError] = useState<string>('');
+  
+  // Recommendations state
+  const [musicRecs, setMusicRecs] = useState<MusicRecommendation[]>([]);
+  const [movieRecs, setMovieRecs] = useState<MovieRecommendation[]>([]);
+  const [bookRecs, setBookRecs] = useState<BookRecommendation[]>([]);
+  const [loadingRecs, setLoadingRecs] = useState(false);
+  const [recsError, setRecsError] = useState<string>('');
   
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const detectionIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
+  // Get user session first
   useEffect(() => {
     getUserSession();
     return () => {
@@ -52,15 +95,58 @@ export default function DashboardPage() {
     };
   }, []);
 
+  // Load recommendations only after user is loaded
+  useEffect(() => {
+    if (isUserLoaded && userId) {
+      console.log('✅ User loaded, fetching initial recommendations for neutral mood');
+      loadRecommendations('neutral');
+    }
+  }, [isUserLoaded, userId]);
+
+  // Load recommendations when emotion changes
+  useEffect(() => {
+    if (currentEmotion && userId && isUserLoaded) {
+      console.log(`✅ Emotion changed to ${currentEmotion.emotion}, loading recommendations`);
+      loadRecommendations(currentEmotion.emotion);
+    }
+  }, [currentEmotion?.emotion]);
+
   const getUserSession = async () => {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (session?.user) {
-      setUserId(session.user.id);
-      loadEmotionHistory(session.user.id);
+    try {
+      console.log('🔍 Getting user session...');
+      const { data: { session }, error } = await supabase.auth.getSession();
+      
+      if (error) {
+        console.log('⚠️ No active session, using guest mode');
+        setUserId('guest_user');
+        setIsUserLoaded(true);
+        return;
+      }
+      
+      if (session?.user) {
+        console.log('✅ User session found:', session.user.id);
+        setUserId(session.user.id);
+        setIsUserLoaded(true);
+        loadEmotionHistory(session.user.id);
+      } else {
+        console.log('⚠️ No user session, using guest mode');
+        setUserId('guest_user');
+        setIsUserLoaded(true);
+      }
+    } catch (error) {
+      console.error('❌ Error getting session:', error);
+      setUserId('guest_user');
+      setIsUserLoaded(true);
+      setError('Could not load user session');
     }
   };
 
   const loadEmotionHistory = async (uid: string) => {
+    if (uid === 'guest_user') {
+      console.log('Guest mode - skipping emotion history load');
+      return;
+    }
+    
     try {
       const response = await fetch('http://localhost:5000/api/emotion/history', {
         method: 'POST',
@@ -77,6 +163,98 @@ export default function DashboardPage() {
       }
     } catch (error) {
       console.error('Error loading emotion history:', error);
+    }
+  };
+
+  const loadRecommendations = async (emotion: string) => {
+    if (!userId) {
+      console.log('⚠️ No user ID, skipping recommendations');
+      return;
+    }
+
+    setLoadingRecs(true);
+    setRecsError('');
+    console.log(`\n🎯 === LOADING RECOMMENDATIONS ===`);
+    console.log(`Emotion: ${emotion}`);
+    console.log(`User ID: ${userId}`);
+    
+    try {
+      // Fetch music recommendations
+      console.log('🎵 Fetching music...');
+      const musicRes = await fetch('http://localhost:5000/api/recommendations/music', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ emotion, user_id: userId }),
+      });
+      
+      if (!musicRes.ok) {
+        console.error('❌ Music API error:', musicRes.status);
+        throw new Error('Music API failed');
+      }
+      
+      const musicData = await musicRes.json();
+      console.log('🎵 Music response:', musicData);
+      
+      if (musicData.success) {
+        setMusicRecs(musicData.recommendations || []);
+        console.log(`✅ Loaded ${musicData.recommendations?.length || 0} music recommendations`);
+      } else {
+        console.warn('⚠️ Music API returned success: false');
+      }
+
+      // Fetch movie recommendations
+      console.log('🎬 Fetching movies...');
+      const movieRes = await fetch('http://localhost:5000/api/recommendations/movies', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ emotion, user_id: userId }),
+      });
+      
+      if (!movieRes.ok) {
+        console.error('❌ Movie API error:', movieRes.status);
+        throw new Error('Movie API failed');
+      }
+      
+      const movieData = await movieRes.json();
+      console.log('🎬 Movie response:', movieData);
+      
+      if (movieData.success) {
+        setMovieRecs(movieData.recommendations || []);
+        console.log(`✅ Loaded ${movieData.recommendations?.length || 0} movie recommendations`);
+      } else {
+        console.warn('⚠️ Movie API returned success: false');
+      }
+
+      // Fetch book recommendations
+      console.log('📚 Fetching books...');
+      const bookRes = await fetch('http://localhost:5000/api/recommendations/books', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ emotion, user_id: userId }),
+      });
+      
+      if (!bookRes.ok) {
+        console.error('❌ Book API error:', bookRes.status);
+        throw new Error('Book API failed');
+      }
+      
+      const bookData = await bookRes.json();
+      console.log('📚 Book response:', bookData);
+      
+      if (bookData.success) {
+        setBookRecs(bookData.recommendations || []);
+        console.log(`✅ Loaded ${bookData.recommendations?.length || 0} book recommendations`);
+      } else {
+        console.warn('⚠️ Book API returned success: false');
+      }
+
+      console.log('✅ All recommendations loaded successfully');
+      
+    } catch (error) {
+      console.error('❌ Error loading recommendations:', error);
+      setRecsError('Could not load recommendations. Please check if the backend is running on http://localhost:5000');
+    } finally {
+      setLoadingRecs(false);
     }
   };
 
@@ -150,13 +328,12 @@ export default function DashboardPage() {
             timestamp: new Date()
           };
           setCurrentEmotion(newEmotion);
-          // Add to history
           setEmotionHistory(prev => [newEmotion, ...prev.slice(0, 9)]);
         }
       } catch (error) {
         console.error('Error detecting emotion:', error);
       }
-    }, 3000);
+    }, 5000);
   };
 
   const handleChatSubmit = async () => {
@@ -168,9 +345,6 @@ export default function DashboardPage() {
     setChatInput('');
     setIsChatLoading(true);
 
-    console.log('Sending chat message:', messageToSend);
-    console.log('User ID:', userId);
-
     try {
       const response = await fetch('http://localhost:5000/api/chatbot/chat', {
         method: 'POST',
@@ -181,14 +355,11 @@ export default function DashboardPage() {
         }),
       });
 
-      console.log('Response status:', response.status);
       const data = await response.json();
-      console.log('Response data:', data);
 
       if (data.success) {
         setChatMessages(prev => [...prev, { role: 'bot', content: data.response }]);
       } else {
-        console.error('Chat error:', data.error);
         setChatMessages(prev => [...prev, { 
           role: 'bot', 
           content: 'Sorry, I encountered an error. Please try again.' 
@@ -226,22 +397,57 @@ export default function DashboardPage() {
     }
   };
 
+  // Show loading state while user is being loaded
+  if (!isUserLoaded) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-purple-50 via-blue-50 to-pink-50 flex items-center justify-center">
+        <div className="text-center">
+          <Loader2 className="w-12 h-12 animate-spin text-purple-600 mx-auto mb-4" />
+          <p className="text-gray-600">Loading...</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-purple-50 via-blue-50 to-pink-50">
       {/* Header */}
       <header className="bg-white shadow-sm">
         <div className="max-w-7xl mx-auto px-4 py-4 flex justify-between items-center">
           <h1 className="text-2xl font-bold text-gray-800">Emotion Dashboard</h1>
-          <button
-            onClick={() => supabase.auth.signOut()}
-            className="px-4 py-2 text-sm text-purple-600 hover:bg-purple-50 rounded-lg transition-all"
-          >
-            Logout
-          </button>
+          <div className="flex items-center gap-4">
+            {userId && userId !== 'guest_user' ? (
+              <>
+                <span className="text-sm text-gray-600">User: {userId.slice(0, 8)}...</span>
+                <button
+                  onClick={() => supabase.auth.signOut()}
+                  className="px-4 py-2 text-sm text-purple-600 hover:bg-purple-50 rounded-lg transition-all"
+                >
+                  Logout
+                </button>
+              </>
+            ) : (
+              <span className="px-4 py-2 text-sm text-gray-600 bg-gray-100 rounded-lg">
+                Guest Mode
+              </span>
+            )}
+          </div>
         </div>
       </header>
 
       <div className="max-w-7xl mx-auto px-4 py-8">
+        {/* Error Display */}
+        {(error || recsError) && (
+          <div className="mb-6 bg-red-50 border border-red-200 rounded-lg p-4 flex items-start gap-3">
+            <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+            <div>
+              <p className="text-red-800 font-semibold">Error</p>
+              <p className="text-red-700 text-sm">{error || recsError}</p>
+              <p className="text-red-600 text-xs mt-1">Make sure the Flask backend is running on http://localhost:5000</p>
+            </div>
+          </div>
+        )}
+
         <div className="grid lg:grid-cols-4 gap-6">
           {/* Main Content - Left Side */}
           <div className="lg:col-span-3 space-y-6">
@@ -251,83 +457,179 @@ export default function DashboardPage() {
                 Welcome to Your Emotion Space
               </h2>
               <p className="text-gray-600">
-                Start your camera to detect your current emotion and get personalized recommendations.
+                {currentEmotion 
+                  ? `You're feeling ${currentEmotion.emotion}. Here are personalized recommendations for you!`
+                  : 'Start your camera to detect your current emotion and get personalized recommendations.'}
               </p>
+              {userId === 'guest_user' && (
+                <div className="mt-4 bg-blue-50 border border-blue-200 rounded-lg p-4">
+                  <p className="text-sm text-blue-800">
+                    💡 <strong>Guest Mode:</strong> You're using the app without login. 
+                    Complete onboarding to save preferences and get personalized suggestions!
+                  </p>
+                </div>
+              )}
             </div>
 
-            {/* Recommendations Section */}
+            {/* Music Recommendations */}
             <div className="bg-white rounded-2xl shadow-lg p-6">
-              <h3 className="text-xl font-bold text-gray-800 mb-6">
-                {currentEmotion ? `Recommendations for ${currentEmotion.emotion}` : 'Your Recommendations'}
-              </h3>
-              
-              <div className="space-y-4">
-                {/* Music Recommendation */}
-                <div className="border-2 border-purple-100 rounded-xl p-6 hover:border-purple-300 transition-all cursor-pointer group">
-                  <div className="flex items-start gap-4">
-                    <div className="bg-gradient-to-br from-purple-500 to-purple-600 p-4 rounded-xl group-hover:scale-110 transition-all">
-                      <Music className="w-8 h-8 text-white" />
-                    </div>
-                    <div className="flex-1">
-                      <h4 className="text-lg font-bold text-gray-800 mb-1">Music</h4>
-                      <p className="text-gray-600 text-sm mb-2">
-                        {currentEmotion 
-                          ? `Playlists curated for when you're feeling ${currentEmotion.emotion}` 
-                          : 'Start camera to get personalized music recommendations'}
-                      </p>
-                      {currentEmotion && (
-                        <button className="text-purple-600 font-semibold text-sm hover:text-purple-700">
-                          View Playlists →
-                        </button>
-                      )}
-                    </div>
-                  </div>
+              <div className="flex items-center gap-3 mb-6">
+                <div className="bg-gradient-to-br from-purple-500 to-purple-600 p-3 rounded-xl">
+                  <Music className="w-6 h-6 text-white" />
                 </div>
-
-                {/* Books Recommendation */}
-                <div className="border-2 border-blue-100 rounded-xl p-6 hover:border-blue-300 transition-all cursor-pointer group">
-                  <div className="flex items-start gap-4">
-                    <div className="bg-gradient-to-br from-blue-500 to-blue-600 p-4 rounded-xl group-hover:scale-110 transition-all">
-                      <Book className="w-8 h-8 text-white" />
-                    </div>
-                    <div className="flex-1">
-                      <h4 className="text-lg font-bold text-gray-800 mb-1">Books</h4>
-                      <p className="text-gray-600 text-sm mb-2">
-                        {currentEmotion 
-                          ? `Books that match your ${currentEmotion.emotion} mood` 
-                          : 'Start camera to get personalized book recommendations'}
-                      </p>
-                      {currentEmotion && (
-                        <button className="text-blue-600 font-semibold text-sm hover:text-blue-700">
-                          Browse Books →
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                </div>
-
-                {/* Movies Recommendation */}
-                <div className="border-2 border-pink-100 rounded-xl p-6 hover:border-pink-300 transition-all cursor-pointer group">
-                  <div className="flex items-start gap-4">
-                    <div className="bg-gradient-to-br from-pink-500 to-pink-600 p-4 rounded-xl group-hover:scale-110 transition-all">
-                      <Film className="w-8 h-8 text-white" />
-                    </div>
-                    <div className="flex-1">
-                      <h4 className="text-lg font-bold text-gray-800 mb-1">Movies</h4>
-                      <p className="text-gray-600 text-sm mb-2">
-                        {currentEmotion 
-                          ? `Films perfect for your ${currentEmotion.emotion} state` 
-                          : 'Start camera to get personalized movie recommendations'}
-                      </p>
-                      {currentEmotion && (
-                        <button className="text-pink-600 font-semibold text-sm hover:text-pink-700">
-                          Watch Now →
-                        </button>
-                      )}
-                    </div>
-                  </div>
+                <div>
+                  <h3 className="text-xl font-bold text-gray-800">Music Playlists</h3>
+                  <p className="text-sm text-gray-600">
+                    {currentEmotion ? `For your ${currentEmotion.emotion} mood` : 'Recommended for you'}
+                  </p>
                 </div>
               </div>
+              
+              {loadingRecs ? (
+                <div className="flex justify-center py-8">
+                  <Loader2 className="w-8 h-8 animate-spin text-purple-600" />
+                </div>
+              ) : musicRecs.length > 0 ? (
+                <div className="grid md:grid-cols-2 gap-4">
+                  {musicRecs.slice(0, 4).map((playlist) => (
+                    <div key={playlist.id} className="border rounded-lg p-4 hover:shadow-md transition-all group cursor-pointer">
+                      <div className="flex gap-3">
+                        {playlist.image && (
+                          <img src={playlist.image} alt={playlist.name} className="w-16 h-16 rounded-lg object-cover" />
+                        )}
+                        <div className="flex-1 min-w-0">
+                          <h4 className="font-semibold text-gray-800 truncate">{playlist.name}</h4>
+                          <p className="text-xs text-gray-600 line-clamp-2 mt-1">{playlist.description}</p>
+                          <div className="flex items-center justify-between mt-2">
+                            <span className="text-xs text-gray-500">{playlist.tracks} tracks</span>
+                            <a 
+                              href={playlist.url} 
+                              target="_blank" 
+                              rel="noopener noreferrer"
+                              className="text-purple-600 text-xs flex items-center gap-1 hover:text-purple-700"
+                            >
+                              Open <ExternalLink className="w-3 h-3" />
+                            </a>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center py-8">
+                  <p className="text-gray-500 mb-2">No music recommendations yet</p>
+                  <p className="text-sm text-gray-400">Complete onboarding or start camera for personalized suggestions</p>
+                </div>
+              )}
+            </div>
+
+            {/* Movie Recommendations */}
+            <div className="bg-white rounded-2xl shadow-lg p-6">
+              <div className="flex items-center gap-3 mb-6">
+                <div className="bg-gradient-to-br from-pink-500 to-pink-600 p-3 rounded-xl">
+                  <Film className="w-6 h-6 text-white" />
+                </div>
+                <div>
+                  <h3 className="text-xl font-bold text-gray-800">Movies</h3>
+                  <p className="text-sm text-gray-600">
+                    {currentEmotion ? `Perfect for your ${currentEmotion.emotion} state` : 'Recommended for you'}
+                  </p>
+                </div>
+              </div>
+              
+              {loadingRecs ? (
+                <div className="flex justify-center py-8">
+                  <Loader2 className="w-8 h-8 animate-spin text-pink-600" />
+                </div>
+              ) : movieRecs.length > 0 ? (
+                <div className="grid md:grid-cols-3 lg:grid-cols-4 gap-4">
+                  {movieRecs.slice(0, 8).map((movie) => (
+                    <div key={movie.id} className="border rounded-lg overflow-hidden hover:shadow-md transition-all group cursor-pointer">
+                      {movie.image && (
+                        <img src={movie.image} alt={movie.title} className="w-full h-48 object-cover" />
+                      )}
+                      <div className="p-3">
+                        <h4 className="font-semibold text-sm text-gray-800 truncate" title={movie.title}>{movie.title}</h4>
+                        <div className="flex items-center gap-1 mt-1">
+                          <Star className="w-3 h-3 text-yellow-500 fill-current" />
+                          <span className="text-xs text-gray-600">{movie.rating.toFixed(1)}</span>
+                        </div>
+                        <p className="text-xs text-gray-500 mt-1">{movie.release_date}</p>
+                        <a 
+                          href={movie.url} 
+                          target="_blank" 
+                          rel="noopener noreferrer"
+                          className="text-pink-600 text-xs flex items-center gap-1 mt-2 hover:text-pink-700"
+                        >
+                          More Info <ExternalLink className="w-3 h-3" />
+                        </a>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center py-8">
+                  <p className="text-gray-500 mb-2">No movie recommendations yet</p>
+                  <p className="text-sm text-gray-400">Complete onboarding or start camera for personalized suggestions</p>
+                </div>
+              )}
+            </div>
+
+            {/* Book Recommendations */}
+            <div className="bg-white rounded-2xl shadow-lg p-6">
+              <div className="flex items-center gap-3 mb-6">
+                <div className="bg-gradient-to-br from-blue-500 to-blue-600 p-3 rounded-xl">
+                  <Book className="w-6 h-6 text-white" />
+                </div>
+                <div>
+                  <h3 className="text-xl font-bold text-gray-800">Books</h3>
+                  <p className="text-sm text-gray-600">
+                    {currentEmotion ? `Matches your ${currentEmotion.emotion} mood` : 'Recommended for you'}
+                  </p>
+                </div>
+              </div>
+              
+              {loadingRecs ? (
+                <div className="flex justify-center py-8">
+                  <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
+                </div>
+              ) : bookRecs.length > 0 ? (
+                <div className="grid md:grid-cols-2 gap-4">
+                  {bookRecs.slice(0, 6).map((book) => (
+                    <div key={book.id} className="border rounded-lg p-4 hover:shadow-md transition-all group cursor-pointer">
+                      <div className="flex gap-3">
+                        {book.image && (
+                          <img src={book.image} alt={book.title} className="w-20 h-28 rounded object-cover flex-shrink-0" />
+                        )}
+                        <div className="flex-1 min-w-0">
+                          <h4 className="font-semibold text-sm text-gray-800 line-clamp-2">{book.title}</h4>
+                          <p className="text-xs text-gray-600 mt-1">{book.authors.join(', ')}</p>
+                          {book.rating > 0 && (
+                            <div className="flex items-center gap-1 mt-1">
+                              <Star className="w-3 h-3 text-yellow-500 fill-current" />
+                              <span className="text-xs text-gray-600">{book.rating.toFixed(1)}</span>
+                            </div>
+                          )}
+                          <a 
+                            href={book.url} 
+                            target="_blank" 
+                            rel="noopener noreferrer"
+                            className="text-blue-600 text-xs flex items-center gap-1 mt-2 hover:text-blue-700"
+                          >
+                            View Book <ExternalLink className="w-3 h-3" />
+                          </a>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center py-8">
+                  <p className="text-gray-500 mb-2">No book recommendations yet</p>
+                  <p className="text-sm text-gray-400">Complete onboarding or start camera for personalized suggestions</p>
+                </div>
+              )}
             </div>
           </div>
 
@@ -359,7 +661,7 @@ export default function DashboardPage() {
                 )}
               </div>
 
-              {/* Video Feed - Google Meet Style */}
+              {/* Video Feed */}
               <div className="relative bg-gray-900 rounded-lg overflow-hidden aspect-[4/3] mb-4">
                 <video
                   ref={videoRef}
