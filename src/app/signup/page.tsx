@@ -79,27 +79,54 @@ export default function SignupPage() {
       }
 
       if (data.user) {
-        // Create user profile in the database
+        console.log('✅ User created in auth:', data.user.id);
+        
+        // ✅ FIXED: Create user profile with upsert and all required columns
         const { error: profileError } = await supabase
           .from('user_profiles')
-          .insert([
+          .upsert([
             {
               id: data.user.id,
               username: username,
               is_onboarded: false,
+              preferred_language: 'English',
+              // Initialize all emotion preference columns as empty strings
+              happy_music: '',
+              happy_books: '',
+              happy_movies: '',
+              sad_music: '',
+              sad_books: '',
+              sad_movies: '',
+              angry_music: '',
+              angry_books: '',
+              angry_movies: '',
+              fear_music: '',
+              fear_books: '',
+              fear_movies: '',
+              neutral_music: '',
+              neutral_books: '',
+              neutral_movies: '',
             },
-          ]);
+          ], { 
+            onConflict: 'id',
+            ignoreDuplicates: false 
+          });
 
         if (profileError) {
-          console.error('Profile creation error:', profileError);
+          console.error('❌ Profile creation error:', profileError);
+          setError('Failed to create user profile. Please try again.');
+          setIsLoading(false);
+          return;
         }
+
+        console.log('✅ User profile created successfully');
 
         // Redirect to onboarding
         router.push('/onboarding');
       }
     } catch (err: any) {
+      console.error('❌ Signup error:', err);
       setError('An unexpected error occurred');
-      console.error('Signup error:', err);
     } finally {
       setIsLoading(false);
     }
