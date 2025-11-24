@@ -24,7 +24,7 @@ CORS(app)  # Enable CORS for Next.js frontend
 # Configure Gemini API
 genai.configure(api_key=os.getenv('GEMINI_API_KEY'))
 
-# ✅ FIXED: Use correct model name
+# Use correct model name
 model = genai.GenerativeModel('gemini-1.5-flash-latest')
 
 # Initialize Supabase client
@@ -48,7 +48,7 @@ except Exception as e:
     print(f"❌ Error loading emotion model: {e}")
     emotion_model = None
 
-# Updated Onboarding questions with clearer format
+# Updated Onboarding questions
 ONBOARDING_QUESTIONS = [
     {
         "id": 1,
@@ -104,9 +104,7 @@ def get_utc_timestamp():
 
 
 def get_language_config(language):
-    """
-    Get language-specific configuration for searching native content
-    """
+    """Get language-specific configuration for searching native content"""
     language_configs = {
         'tamil': {
             'music_terms': ['tamil songs', 'tamil music', 'kollywood music', 'tamil'],
@@ -228,25 +226,13 @@ def get_spotify_token():
 def get_user_language(user_id):
     """Get user's preferred language from database"""
     try:
-        result = supabase.table('onboarding_responses')\
-            .select('language')\
-            .eq('user_id', user_id)\
-            .not_.is_('language', 'null')\
-            .limit(1)\
-            .execute()
-        
-        if result.data and len(result.data) > 0 and result.data[0].get('language'):
-            lang = result.data[0]['language']
-            print(f"🌍 Found language: {lang}")
-            return lang
-        
-        profile_result = supabase.table('user_profiles')\
+        result = supabase.table('user_profiles')\
             .select('preferred_language')\
             .eq('id', user_id)\
             .execute()
         
-        if profile_result.data and len(profile_result.data) > 0:
-            lang = profile_result.data[0].get('preferred_language', 'English')
+        if result.data and len(result.data) > 0:
+            lang = result.data[0].get('preferred_language', 'English')
             print(f"🌍 Found language in profile: {lang}")
             return lang
         
@@ -256,35 +242,44 @@ def get_user_language(user_id):
         return 'English'
 
 
-def get_user_preferences_for_emotion(user_id, emotion):
-    """
-    Get user's EXACT preferences from onboarding_responses for a specific emotion
-    Returns the raw response text from the user
-    """
+def get_user_preferences(user_id):
+    """Get all user preferences from user_profiles table with better error handling"""
     try:
-        result = supabase.table('onboarding_responses')\
-            .select('response')\
-            .eq('user_id', user_id)\
-            .eq('emotion', emotion)\
-            .limit(1)\
+        print(f"🔍 Fetching preferences for user: {user_id}")
+        
+        if not user_id or user_id == 'guest_user':
+            print("⚠️ Guest user - returning None")
+            return None
+        
+        result = supabase.table('user_profiles')\
+            .select('*')\
+            .eq('id', user_id)\
             .execute()
         
-        if result.data and len(result.data) > 0:
-            user_response = result.data[0]['response']
-            print(f"📝 Found user preference for {emotion}: {user_response}")
-            return user_response
+        if hasattr(result, 'data') and result.data and len(result.data) > 0:
+            user_prefs = result.data[0]
+            print(f"✅ Found preferences")
+            
+            # Debug: print all emotion-based preferences
+            for emotion in ['happy', 'sad', 'angry', 'fear', 'neutral']:
+                music_key = f'{emotion}_music'
+                books_key = f'{emotion}_books'
+                movies_key = f'{emotion}_movies'
+                print(f"   {emotion}: music='{user_prefs.get(music_key)}', books='{user_prefs.get(books_key)}', movies='{user_prefs.get(movies_key)}'")
+            
+            return user_prefs
         
-        print(f"⚠️ No preferences found for {emotion}")
+        print("⚠️ No data found for user")
         return None
+        
     except Exception as e:
-        print(f"❌ Error fetching preferences: {e}")
+        print(f"❌ Error fetching preferences: {type(e).__name__}: {e}")
+        import traceback
+        traceback.print_exc()
         return None
-
 
 def extract_genres_from_user_response(user_response):
-    """
-    Extract EXACT genres from user's response - IMPROVED with fallback parsing
-    """
+    """Extract genres from user's response"""
     try:
         prompt = f"""Extract the EXACT genres mentioned by the user from this text: "{user_response}"
 
@@ -300,8 +295,6 @@ Return ONLY a JSON object:
 Examples:
 "rock, thriller, action" -> {{"music": ["rock"], "books": ["thriller"], "movies": ["action"]}}
 "pop songs, romance books, comedy films" -> {{"music": ["pop"], "books": ["romance"], "movies": ["comedy"]}}
-"soft, fiction, romantic" -> {{"music": ["soft"], "books": ["fiction"], "movies": ["romantic"]}}
-"motivating, comic, love" -> {{"music": ["motivating"], "books": ["comic"], "movies": ["love"]}}
 
 Keep genres lowercase and simple. If 3 items are given, assume order: music, books, movies."""
 
@@ -320,7 +313,6 @@ Keep genres lowercase and simple. If 3 items are given, assume order: music, boo
     except Exception as e:
         print(f"⚠️ Gemini extraction failed: {e}, trying fallback parsing...")
         
-        # FALLBACK: Simple comma-separated parsing
         try:
             parts = [p.strip() for p in user_response.replace(' and ', ',').split(',')]
             
@@ -333,7 +325,6 @@ Keep genres lowercase and simple. If 3 items are given, assume order: music, boo
                 print(f"✅ Fallback extraction successful: {extracted}")
                 return extracted
             elif len(parts) == 1:
-                # Single item - use for all
                 extracted = {
                     'music': [parts[0]],
                     'books': [parts[0]],
@@ -385,7 +376,7 @@ Examples:
 
 
 def validate_response_with_gemini(user_answer, emotion):
-    """Validate if response contains music, books, and movies - IMPROVED VERSION"""
+    """Validate if response contains music, books, and movies"""
     validation_prompt = f"""Validate this response for {emotion} preferences: "{user_answer}"
 
 The user should mention their preferences for Music, Books, and Movies.
@@ -393,10 +384,7 @@ The user should mention their preferences for Music, Books, and Movies.
 IMPORTANT: Be VERY lenient with the format. Accept responses like:
 - "rock, thriller, action" (assume order: music, books, movies)
 - "I like rock music, thriller books, action movies"
-- "rock music, thriller novels, action films"
 - Simple comma-separated: "love, fiction, action"
-- "pop, romance, comedy"
-- "soft, fiction, romantic"
 
 If the user provides 3 items separated by commas/and, ALWAYS assume they are in order: music, books, movies.
 
@@ -414,7 +402,6 @@ Return JSON:
         response = model.generate_content(validation_prompt)
         result_text = response.text.strip()
         
-        # Clean JSON
         if "```json" in result_text:
             result_text = result_text.split("```json")[1].split("```")[0].strip()
         elif "```" in result_text:
@@ -430,7 +417,6 @@ Return JSON:
         }
         feedback = result.get('feedback', '')
         
-        # Additional check: if we have all three items, it's valid
         if extracted_data['music'] and extracted_data['books'] and extracted_data['movies']:
             is_valid = True
             feedback = ''
@@ -446,7 +432,6 @@ Return JSON:
         
     except Exception as e:
         print(f"⚠️ Validation error: {e}, trying fallback parsing...")
-        # Fallback: try simple parsing for comma-separated values
         parts = [p.strip() for p in user_answer.split(',')]
         if len(parts) >= 3:
             print(f"✅ Fallback parsing successful: assuming order music, books, movies")
@@ -578,15 +563,6 @@ def submit_answer():
                 'preferred_language': language
             }).eq('id', user_id).execute()
             
-            supabase.table('onboarding_responses').insert({
-                'user_id': user_id,
-                'question': current_question['question'],
-                'response': answer,
-                'emotion': None,
-                'language': language,
-                'created_at': get_utc_timestamp()
-            }).execute()
-            
             print(f"✅ Saved language: {language} for user {user_id}")
         except Exception as e:
             print(f"❌ Error saving language: {e}")
@@ -616,21 +592,32 @@ def submit_answer():
         session['responses'].append({
             'question_id': current_question['id'],
             'answer': answer,
-            'emotion': current_question['emotion']
+            'emotion': current_question['emotion'],
+            'extracted': extracted_data
         })
         
-        # Save to database
+        # ✅ SAVE TO NEW DATABASE STRUCTURE (user_profiles columns)
         try:
-            supabase.table('onboarding_responses').insert({
-                'user_id': user_id,
-                'question': current_question['question'],
-                'response': answer,
-                'emotion': current_question['emotion'],
-                'created_at': get_utc_timestamp()
-            }).execute()
-            print(f"✅ Saved {current_question['emotion']} preferences for user {user_id}")
+            emotion = current_question['emotion']
+            music_col = f'{emotion}_music'
+            books_col = f'{emotion}_books'
+            movies_col = f'{emotion}_movies'
+            
+            # Extract individual preferences
+            music_pref = extracted_data.get('music', '')
+            books_pref = extracted_data.get('books', '')
+            movies_pref = extracted_data.get('movies', '')
+            
+            update_data = {
+                music_col: music_pref,
+                books_col: books_pref,
+                movies_col: movies_pref
+            }
+            
+            supabase.table('user_profiles').update(update_data).eq('id', user_id).execute()
+            print(f"✅ Saved {emotion} preferences: music={music_pref}, books={books_pref}, movies={movies_pref}")
         except Exception as e:
-            print(f"❌ Error saving: {e}")
+            print(f"❌ Error saving preferences: {e}")
     
     session['current_question'] += 1
     
@@ -648,12 +635,14 @@ def submit_answer():
         except:
             summary = "Thank you! Your preferences have been saved."
         
+        # ✅ MARK USER AS ONBOARDED
         try:
             supabase.table('user_profiles').update({
                 'is_onboarded': True
             }).eq('id', user_id).execute()
-        except:
-            pass
+            print(f"✅ Marked user {user_id} as onboarded")
+        except Exception as e:
+            print(f"❌ Error marking user as onboarded: {e}")
         
         return jsonify({
             'success': True,
@@ -674,89 +663,138 @@ def submit_answer():
         'timestamp': get_utc_timestamp()
     })
 
+# ==================== PREFERENCES ENDPOINTS ====================
 
-@app.route('/api/chatbot/chat', methods=['POST'])
-def chat():
-    """Chat endpoint"""
-    data = request.json
-    message = data.get('message', '')
-    user_id = data.get('user_id')
-    
-    if not message:
-        return jsonify({'success': False, 'error': 'Message required'}), 400
-    
-    try:
-        user_language = get_user_language(user_id) if user_id and user_id != 'guest_user' else 'English'
-        
-        prompt = f"""You are a supportive AI companion. Respond in {user_language}.
-User: {message}
-Be warm and helpful (2-4 sentences):"""
-        
-        response = model.generate_content(prompt)
-        
-        return jsonify({
-            'success': True,
-            'response': response.text,
-            'timestamp': get_utc_timestamp()
-        })
-    except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-
-@app.route('/api/preferences/update', methods=['POST'])
-def update_preference():
-    """Update preference"""
-    data = request.json
-    user_id = data.get('user_id')
-    emotion = data.get('emotion')
-    new_preference = data.get('preference')
-    
-    if not all([user_id, emotion, new_preference]):
-        return jsonify({'success': False, 'error': 'Missing fields'}), 400
-    
-    try:
-        existing = supabase.table('onboarding_responses')\
-            .select('id').eq('user_id', user_id).eq('emotion', emotion).execute()
-        
-        if existing.data:
-            supabase.table('onboarding_responses')\
-                .update({'response': new_preference})\
-                .eq('user_id', user_id).eq('emotion', emotion).execute()
-        else:
-            supabase.table('onboarding_responses').insert({
-                'user_id': user_id,
-                'emotion': emotion,
-                'response': new_preference,
-                'created_at': get_utc_timestamp()
-            }).execute()
-        
-        return jsonify({'success': True})
-    except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-
-@app.route('/api/preferences/get', methods=['POST'])
-def get_preferences():
-    """Get preferences"""
+@app.route('/api/preferences/get-all', methods=['POST'])
+def get_all_preferences():
+    """Get all user preferences"""
     data = request.json
     user_id = data.get('user_id')
     
     if not user_id:
-        return jsonify({'success': False}), 400
+        return jsonify({'success': False, 'error': 'User ID required'}), 400
     
     try:
-        user_language = get_user_language(user_id)
-        result = supabase.table('onboarding_responses')\
-            .select('emotion, response').eq('user_id', user_id).execute()
+        print(f"\n📋 === GET ALL PREFERENCES ===")
+        print(f"User ID: {user_id}")
         
-        preferences = {r['emotion']: r['response'] for r in result.data if r.get('emotion')}
+        result = supabase.table('user_profiles')\
+            .select('*')\
+            .eq('id', user_id)\
+            .execute()
+        
+        print(f"Query result: {result}")
+        print(f"Data length: {len(result.data) if result.data else 0}")
+        
+        if result.data and len(result.data) > 0:
+            row = result.data[0]
+            
+            preferences = {
+                'preferred_language': row.get('preferred_language') or 'English',
+                'happy_music': row.get('happy_music') or '',
+                'happy_books': row.get('happy_books') or '',
+                'happy_movies': row.get('happy_movies') or '',
+                'sad_music': row.get('sad_music') or '',
+                'sad_books': row.get('sad_books') or '',
+                'sad_movies': row.get('sad_movies') or '',
+                'angry_music': row.get('angry_music') or '',
+                'angry_books': row.get('angry_books') or '',
+                'angry_movies': row.get('angry_movies') or '',
+                'fear_music': row.get('fear_music') or '',
+                'fear_books': row.get('fear_books') or '',
+                'fear_movies': row.get('fear_movies') or '',
+                'neutral_music': row.get('neutral_music') or '',
+                'neutral_books': row.get('neutral_books') or '',
+                'neutral_movies': row.get('neutral_movies') or ''
+            }
+            
+            print(f"✅ Preferences loaded successfully")
+            print(f"Sample: happy_movies={preferences['happy_movies']}")
+            
+            return jsonify({
+                'success': True,
+                'preferences': preferences
+            })
+        else:
+            print("⚠️ No user profile found")
+            return jsonify({'success': False, 'error': 'User profile not found'}), 404
+            
+    except Exception as e:
+        print(f"❌ Error fetching preferences: {type(e).__name__}: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/preferences/update-all', methods=['POST'])
+def update_all_preferences():
+    """Update all user preferences"""
+    data = request.json
+    user_id = data.get('user_id')
+    preferences = data.get('preferences')
+    
+    if not user_id or not preferences:
+        return jsonify({'success': False, 'error': 'User ID and preferences required'}), 400
+    
+    try:
+        print(f"\n💾 === UPDATE ALL PREFERENCES ===")
+        print(f"User ID: {user_id}")
+        print(f"Preferences received: {preferences}")
+        
+        # Validate that preferences is a dictionary
+        if not isinstance(preferences, dict):
+            return jsonify({'success': False, 'error': 'Invalid preferences format'}), 400
+        
+        # Clean and prepare update data
+        update_data = {}
+        
+        # Language
+        if 'preferred_language' in preferences:
+            update_data['preferred_language'] = str(preferences['preferred_language']).strip()
+        
+        # Emotions
+        emotions = ['happy', 'sad', 'angry', 'fear', 'neutral']
+        categories = ['music', 'books', 'movies']
+        
+        for emotion in emotions:
+            for category in categories:
+                key = f'{emotion}_{category}'
+                if key in preferences:
+                    value = preferences[key]
+                    # Convert to string and strip whitespace, or empty string if None
+                    update_data[key] = str(value).strip() if value else ''
+        
+        print(f"Cleaned update data: {update_data}")
+        
+        # Perform the update
+        result = supabase.table('user_profiles')\
+            .update(update_data)\
+            .eq('id', user_id)\
+            .execute()
+        
+        print(f"Update result: {result}")
+        
+        # Verify the update
+        verify_result = supabase.table('user_profiles')\
+            .select('*')\
+            .eq('id', user_id)\
+            .execute()
+        
+        if verify_result.data and len(verify_result.data) > 0:
+            print(f"✅ Verification successful")
+            print(f"Updated row sample: happy_movies={verify_result.data[0].get('happy_movies')}")
+        else:
+            print("⚠️ Could not verify update")
         
         return jsonify({
             'success': True,
-            'language': user_language,
-            'preferences': preferences
+            'message': 'Preferences updated successfully'
         })
+        
     except Exception as e:
+        print(f"❌ Error updating preferences: {type(e).__name__}: {e}")
+        import traceback
+        traceback.print_exc()
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
@@ -814,67 +852,29 @@ def get_emotion_history():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
-@app.route('/api/chatbot/status', methods=['POST'])
-def get_status():
-    """Get onboarding status"""
-    data = request.json
-    user_id = data.get('user_id', 'anonymous')
-    
-    if user_id not in user_sessions:
-        return jsonify({'success': True, 'exists': False})
-    
-    session = user_sessions[user_id]
-    
-    return jsonify({
-        'success': True,
-        'exists': True,
-        'completed': session['completed'],
-        'current_question': session['current_question'] + 1,
-        'total_questions': len(ONBOARDING_QUESTIONS)
-    })
-
-
-@app.route('/api/chatbot/responses', methods=['POST'])
-def get_user_responses():
-    """Get responses"""
-    data = request.json
-    user_id = data.get('user_id')
-    
-    if not user_id:
-        return jsonify({'success': False}), 400
-    
-    try:
-        result = supabase.table('onboarding_responses').select('*').eq('user_id', user_id).execute()
-        return jsonify({'success': True, 'responses': result.data})
-    except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-
-# ==================== RECOMMENDATIONS USING USER'S EXACT PREFERENCES ====================
+# ==================== RECOMMENDATIONS ====================
 
 @app.route('/api/recommendations/music', methods=['POST'])
 def get_music_recommendations():
-    """Get music recommendations based on USER'S EXACT PREFERENCES from database"""
+    """Get music recommendations based on user preferences"""
     data = request.json
     emotion = data.get('emotion', 'neutral')
     user_id = data.get('user_id')
     
-    print(f"\n🎵 === MUSIC RECOMMENDATION (USER PREFERENCES) ===")
+    print(f"\n🎵 === MUSIC RECOMMENDATION ===")
     print(f"Emotion: {emotion}, User: {user_id}")
     
     try:
-        # Get user language
         user_language = get_user_language(user_id) if user_id and user_id != 'guest_user' else 'English'
         print(f"🌍 Language: {user_language}")
         
-        # Get language config
         lang_config = get_language_config(user_language)
         
-        # Get user's EXACT preference from database
-        user_preference_text = get_user_preferences_for_emotion(user_id, emotion) if user_id and user_id != 'guest_user' else None
+        # Get user preferences from new structure
+        preferences = get_user_preferences(user_id) if user_id and user_id != 'guest_user' else None
         
-        if not user_preference_text:
-            print("⚠️ No user preferences found, using defaults")
+        if not preferences:
+            print("⚠️ No user preferences found")
             return jsonify({
                 'success': True,
                 'emotion': emotion,
@@ -883,16 +883,20 @@ def get_music_recommendations():
                 'language': user_language
             })
         
-        # Extract genres from user's response
-        extracted = extract_genres_from_user_response(user_preference_text)
-        if not extracted or not extracted.get('music'):
-            print("❌ Could not extract music genres, using user text directly")
-            # Fallback: use the first word from user text
-            user_music_genres = [user_preference_text.split(',')[0].strip()]
-        else:
-            user_music_genres = extracted['music']
+        # Get music preference for this emotion
+        music_pref = preferences.get(f'{emotion}_music', '')
         
-        print(f"🎸 User's music genres: {user_music_genres}")
+        if not music_pref:
+            print(f"⚠️ No music preference for {emotion}")
+            return jsonify({
+                'success': True,
+                'emotion': emotion,
+                'recommendations': [],
+                'message': 'Please set your preferences in settings',
+                'language': user_language
+            })
+        
+        print(f"🎸 User's music preference: {music_pref}")
         
         token = get_spotify_token()
         if not token:
@@ -902,46 +906,18 @@ def get_music_recommendations():
         search_url = 'https://api.spotify.com/v1/search'
         playlists = []
         
-        # Search with LANGUAGE + USER'S GENRES
-        print(f"\n🔍 Searching: {user_language} + {user_music_genres}")
-        
-        # For non-English languages, search with language-specific terms
-        if lang_config['music_terms']:
-            for lang_term in lang_config['music_terms'][:2]:
-                for user_genre in user_music_genres[:2]:
-                    search_query = f'{lang_term} {user_genre}'
-                    print(f"   Query: {search_query}")
-                    
-                    params = {
-                        'q': search_query,
-                        'type': 'playlist',
-                        'limit': 5,
-                        'market': lang_config['market']
-                    }
-                    
-                    response = requests.get(search_url, headers=headers, params=params)
-                    if response.status_code == 200:
-                        data_resp = response.json()
-                        for playlist in data_resp.get('playlists', {}).get('items', []):
-                            if playlist and playlist['id'] not in [p['id'] for p in playlists]:
-                                playlists.append({
-                                    'id': playlist['id'],
-                                    'name': playlist['name'],
-                                    'description': playlist.get('description', ''),
-                                    'image': playlist['images'][0]['url'] if playlist.get('images') else None,
-                                    'url': playlist['external_urls']['spotify'],
-                                    'tracks': playlist['tracks']['total']
-                                })
-                                print(f"      ✅ {playlist['name']}")
-        
-        # Also search with just user's genres (for English or additional results)
-        for user_genre in user_music_genres:
+        # Search with language + user's genre
+        for lang_term in lang_config['music_terms'][:2]:
+            search_query = f'{lang_term} {music_pref}'
+            print(f"   Query: {search_query}")
+            
             params = {
-                'q': user_genre,
+                'q': search_query,
                 'type': 'playlist',
                 'limit': 5,
                 'market': lang_config['market']
             }
+            
             response = requests.get(search_url, headers=headers, params=params)
             if response.status_code == 200:
                 data_resp = response.json()
@@ -956,13 +932,32 @@ def get_music_recommendations():
                             'tracks': playlist['tracks']['total']
                         })
         
+        # Also search with just user's genre
+        params = {
+            'q': music_pref,
+            'type': 'playlist',
+            'limit': 5,
+            'market': lang_config['market']
+        }
+        response = requests.get(search_url, headers=headers, params=params)
+        if response.status_code == 200:
+            data_resp = response.json()
+            for playlist in data_resp.get('playlists', {}).get('items', []):
+                if playlist and playlist['id'] not in [p['id'] for p in playlists]:
+                    playlists.append({
+                        'id': playlist['id'],
+                        'name': playlist['name'],
+                        'description': playlist.get('description', ''),
+                        'image': playlist['images'][0]['url'] if playlist.get('images') else None,
+                        'url': playlist['external_urls']['spotify'],
+                        'tracks': playlist['tracks']['total']
+                    })
+        
         print(f"\n✅ Found {len(playlists)} playlists")
         
         return jsonify({
             'success': True,
             'emotion': emotion,
-            'genres': user_music_genres,
-            'user_preference': user_preference_text,
             'recommendations': playlists[:10],
             'language': user_language,
             'timestamp': get_utc_timestamp()
@@ -975,227 +970,286 @@ def get_music_recommendations():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
-# ==================== REPLACE ONLY THESE TWO FUNCTIONS IN YOUR app.py ====================
-
 @app.route('/api/recommendations/movies', methods=['POST'])
 def get_movie_recommendations():
-    """Get movie recommendations - FIXED NULL HANDLING"""
-    data = request.json
-    emotion = data.get('emotion', 'neutral')
-    user_id = data.get('user_id')
-    
-    print(f"\n🎬 === MOVIE RECOMMENDATION ===")
-    print(f"Emotion: {emotion}, User: {user_id}")
-    
+    """Get movie recommendations"""
     try:
-        # Get user language
-        user_language = get_user_language(user_id) if user_id and user_id != 'guest_user' else 'English'
-        print(f"🌍 Language: {user_language}")
+        data = request.json
+        emotion = data.get('emotion', 'neutral')
+        user_id = data.get('user_id')
         
-        # Get language config
+        print(f"\n🎬 === MOVIE RECOMMENDATION START ===")
+        print(f"Emotion: {emotion}, User: {user_id}")
+        
+        # Step 1: Get user language
+        try:
+            user_language = get_user_language(user_id) if user_id and user_id != 'guest_user' else 'English'
+            print(f"🌍 Language: {user_language}")
+        except Exception as e:
+            print(f"⚠️ Error getting language, using English: {e}")
+            user_language = 'English'
+        
         lang_config = get_language_config(user_language)
         tmdb_lang = lang_config['tmdb_lang']
         
-        # Get user's EXACT preference from database
-        user_preference_text = get_user_preferences_for_emotion(user_id, emotion) if user_id and user_id != 'guest_user' else None
+        # Step 2: Get user preferences
+        try:
+            preferences = get_user_preferences(user_id) if user_id and user_id != 'guest_user' else None
+            print(f"📋 Preferences retrieved: {preferences is not None}")
+        except Exception as e:
+            print(f"⚠️ Error getting preferences: {e}")
+            preferences = None
         
-        if not user_preference_text:
-            print("⚠️ No user preferences found")
+        if not preferences:
+            print("⚠️ No user preferences found - returning empty recommendations")
             return jsonify({
                 'success': True,
                 'emotion': emotion,
                 'recommendations': [],
-                'message': 'Please complete onboarding',
+                'message': 'Please complete onboarding to get personalized recommendations',
                 'language': user_language,
                 'timestamp': get_utc_timestamp()
             })
         
-        # Extract genres from user's response (same as music)
-        extracted = extract_genres_from_user_response(user_preference_text)
-        if not extracted or not extracted.get('movies'):
-            print("❌ Could not extract movie genres")
-            # Fallback: try to get third item from comma-separated
-            parts = user_preference_text.split(',')
-            user_movie_genres = [parts[2].strip()] if len(parts) >= 3 else ['drama']
-        else:
-            user_movie_genres = extracted['movies']
+        # Step 3: Get movie preference for this emotion
+        movie_pref_key = f'{emotion}_movies'
+        movie_pref = preferences.get(movie_pref_key, '')
+        print(f"🎭 Looking for key: {movie_pref_key}")
+        print(f"🎭 Movie preference value: '{movie_pref}'")
         
-        print(f"🎭 Movie genres: {user_movie_genres}")
-        
-        # Get TMDB genre IDs
-        genre_url = f'https://api.themoviedb.org/3/genre/movie/list?api_key={TMDB_API_KEY}&language={tmdb_lang}'
-        genre_response = requests.get(genre_url)
-        
-        if genre_response.status_code != 200:
-            print(f"❌ TMDB genre API failed: {genre_response.status_code}")
+        if not movie_pref or movie_pref.strip() == '':
+            print(f"⚠️ No movie preference set for {emotion}")
             return jsonify({
-                'success': False, 
-                'error': 'TMDB API error',
+                'success': True,
+                'emotion': emotion,
+                'recommendations': [],
+                'message': f'Please set your movie preferences for {emotion} mood in settings',
+                'language': user_language,
+                'timestamp': get_utc_timestamp()
+            })
+        
+        # Step 4: Fetch TMDB genres
+        print(f"\n📡 Fetching TMDB genres...")
+        genre_map = {}
+        
+        try:
+            if not TMDB_API_KEY:
+                raise Exception("TMDB_API_KEY not configured")
+            
+            genre_url = f'https://api.themoviedb.org/3/genre/movie/list?api_key={TMDB_API_KEY}&language={tmdb_lang}'
+            print(f"🔗 Genre URL: {genre_url}")
+            
+            genre_response = requests.get(genre_url, timeout=10)
+            print(f"📊 Genre API Status: {genre_response.status_code}")
+            
+            if genre_response.status_code != 200:
+                raise Exception(f"TMDB API returned {genre_response.status_code}")
+            
+            genre_data = genre_response.json()
+            print(f"📦 Genre data keys: {genre_data.keys()}")
+            
+            # Build genre map
+            for g in genre_data.get('genres', []):
+                if g and isinstance(g, dict) and 'name' in g and 'id' in g:
+                    genre_name = str(g['name']).lower().strip()
+                    genre_map[genre_name] = int(g['id'])
+            
+            print(f"📋 Genre map created with {len(genre_map)} genres")
+            print(f"📋 Available genres: {list(genre_map.keys())[:10]}...")
+            
+        except Exception as e:
+            print(f"❌ CRITICAL: Error fetching TMDB genres: {type(e).__name__}: {e}")
+            import traceback
+            traceback.print_exc()
+            return jsonify({
+                'success': False,
+                'error': f'Failed to fetch movie genres: {str(e)}',
                 'timestamp': get_utc_timestamp()
             }), 500
         
-        genre_data = genre_response.json()
-        
-        # ✅ FIX: Filter out None values before creating the genre map
-        genre_map = {}
-        for g in genre_data.get('genres', []):
-            if g and g.get('name') and g.get('id'):  # Ensure both name and id exist
-                genre_name = g['name'].lower()
-                genre_map[genre_name] = g['id']
-        
-        print(f"📋 Available TMDB genres: {list(genre_map.keys())}")
-        
-        # Map user's genres to TMDB IDs (improved matching)
+        # Step 5: Map user preference to genre IDs
+        print(f"\n🔍 Mapping preference '{movie_pref}' to genre IDs...")
         genre_ids = []
-        for user_genre in user_movie_genres:
-            g_lower = user_genre.lower().strip()
-            print(f"   Trying to match: '{g_lower}'")
-            
-            # Try exact match
-            if g_lower in genre_map:
-                genre_ids.append(genre_map[g_lower])
-                print(f"   ✅ Exact match: {g_lower} -> {genre_map[g_lower]}")
-            else:
-                # Try partial match
-                matched = False
-                for tmdb_genre, gid in genre_map.items():
-                    if g_lower in tmdb_genre or tmdb_genre in g_lower:
-                        genre_ids.append(gid)
-                        print(f"   ✅ Partial match: {g_lower} ~ {tmdb_genre} -> {gid}")
-                        matched = True
-                        break
-                
-                if not matched:
-                    # Special handling for common genre variations
-                    genre_variations = {
-                        'love': 'romance',
-                        'romantic': 'romance',
-                        'scary': 'horror',
-                        'funny': 'comedy',
-                        'sad': 'drama',
-                        'action': 'action',
-                        'adventure': 'adventure',
-                        'thriller': 'thriller',
-                        'crime': 'crime',
-                        'mystery': 'mystery',
-                        'scifi': 'science fiction',
-                        'sci-fi': 'science fiction',
-                        'fantasy': 'fantasy',
-                        'animation': 'animation',
-                        'family': 'family',
-                        'war': 'war',
-                        'western': 'western',
-                        'history': 'history',
-                        'historical': 'history',
-                        'music': 'music',
-                        'documentary': 'documentary'
-                    }
-                    
-                    mapped_genre = genre_variations.get(g_lower)
-                    if mapped_genre and mapped_genre in genre_map:
-                        genre_ids.append(genre_map[mapped_genre])
-                        print(f"   ✅ Variation match: {g_lower} -> {mapped_genre} -> {genre_map[mapped_genre]}")
-                    else:
-                        print(f"   ⚠️ No match found for: {g_lower}")
+        g_lower = movie_pref.lower().strip()
         
-        # If no matches, use popular genres based on emotion
+        # Try exact match
+        if g_lower in genre_map:
+            genre_ids.append(genre_map[g_lower])
+            print(f"   ✅ Exact match: {g_lower} -> {genre_map[g_lower]}")
+        
+        # Try partial match
         if not genre_ids:
-            emotion_genre_defaults = {
+            for tmdb_genre, gid in genre_map.items():
+                if g_lower in tmdb_genre or tmdb_genre in g_lower:
+                    genre_ids.append(gid)
+                    print(f"   ✅ Partial match: {g_lower} ~ {tmdb_genre} -> {gid}")
+                    break
+        
+        # Try genre variations
+        if not genre_ids:
+            genre_variations = {
+                'love': 'romance',
+                'romantic': 'romance',
+                'romcom': 'romance',
+                'scary': 'horror',
+                'funny': 'comedy',
+                'comedies': 'comedy',
+                'sad': 'drama',
+                'dramas': 'drama',
+                'action': 'action',
+                'adventure': 'adventure',
+                'thriller': 'thriller',
+                'suspense': 'thriller',
+                'mystery': 'mystery',
+                'scifi': 'science fiction',
+                'sci-fi': 'science fiction',
+                'animated': 'animation',
+                'cartoon': 'animation'
+            }
+            
+            mapped_genre = genre_variations.get(g_lower)
+            if mapped_genre and mapped_genre in genre_map:
+                genre_ids.append(genre_map[mapped_genre])
+                print(f"   ✅ Variation match: {g_lower} -> {mapped_genre} -> {genre_map[mapped_genre]}")
+        
+        # Use emotion defaults if no match
+        if not genre_ids:
+            emotion_defaults = {
                 'happy': [35, 10749],  # Comedy, Romance
                 'sad': [18],  # Drama
                 'angry': [28, 53],  # Action, Thriller
                 'fear': [27, 9648],  # Horror, Mystery
                 'neutral': [18, 35],  # Drama, Comedy
-                'surprise': [12, 14],  # Adventure, Fantasy
-                'disgust': [80]  # Crime
+                'surprise': [12, 878],  # Adventure, Sci-Fi
+                'disgust': [35, 18]  # Comedy, Drama
             }
-            genre_ids = emotion_genre_defaults.get(emotion, [18])  # Default to Drama
-            print(f"   ⚠️ Using emotion-based defaults: {genre_ids}")
+            genre_ids = emotion_defaults.get(emotion, [18])
+            print(f"   ⚠️ No match found, using emotion defaults for {emotion}: {genre_ids}")
         
         print(f"🎬 Final genre IDs: {genre_ids}")
         
+        # Step 6: Fetch movies from TMDB
         movies = []
         discover_url = 'https://api.themoviedb.org/3/discover/movie'
         
-        # Search in user's language first
+        # Try user's language first
         print(f"\n🔍 Searching {user_language} movies...")
         params = {
             'api_key': TMDB_API_KEY,
             'with_genres': '|'.join(map(str, genre_ids)),
             'with_original_language': tmdb_lang,
             'sort_by': 'popularity.desc',
-            'vote_average.gte': 6.0,
-            'vote_count.gte': 10,
+            'vote_average.gte': 5.0,
+            'vote_count.gte': 5,
             'page': 1
         }
         
-        response = requests.get(discover_url, params=params)
-        print(f"   TMDB API status: {response.status_code}")
-        
-        if response.status_code == 200:
-            data_resp = response.json()
-            results = data_resp.get('results', [])
-            print(f"   Found {len(results)} results")
-            
-            for movie in results[:15]:
-                if movie.get('poster_path'):  # Only add if has poster
-                    movies.append({
-                        'id': movie['id'],
-                        'title': movie['title'],
-                        'description': movie.get('overview', 'No description')[:200] + ('...' if len(movie.get('overview', '')) > 200 else ''),
-                        'image': f"https://image.tmdb.org/t/p/w500{movie['poster_path']}",
-                        'rating': movie.get('vote_average', 0),
-                        'release_date': movie.get('release_date', 'N/A'),
-                        'url': f"https://www.themoviedb.org/movie/{movie['id']}"
-                    })
-                    print(f"      ✅ {movie['title']}")
-        
-        # Add English movies if needed
-        if len(movies) < 8:
-            print(f"\n🔍 Adding English movies (currently have {len(movies)})...")
-            params['with_original_language'] = 'en'
-            response = requests.get(discover_url, params=params)
+        try:
+            response = requests.get(discover_url, params=params, timeout=10)
+            print(f"📊 Movie search status: {response.status_code}")
             
             if response.status_code == 200:
                 data_resp = response.json()
-                for movie in data_resp.get('results', [])[:15]:
-                    if movie['id'] not in [m['id'] for m in movies] and movie.get('poster_path'):
+                results = data_resp.get('results', [])
+                print(f"📦 Found {len(results)} movies in {user_language}")
+                
+                for movie in results[:15]:
+                    if not movie or not isinstance(movie, dict):
+                        continue
+                    
+                    movie_id = movie.get('id')
+                    poster_path = movie.get('poster_path')
+                    
+                    if movie_id and poster_path:
+                        overview = movie.get('overview', '')
+                        description = (overview[:200] + '...') if len(overview) > 200 else (overview or 'No description')
+                        
                         movies.append({
-                            'id': movie['id'],
-                            'title': movie['title'],
-                            'description': movie.get('overview', 'No description')[:200] + ('...' if len(movie.get('overview', '')) > 200 else ''),
-                            'image': f"https://image.tmdb.org/t/p/w500{movie['poster_path']}",
-                            'rating': movie.get('vote_average', 0),
-                            'release_date': movie.get('release_date', 'N/A'),
-                            'url': f"https://www.themoviedb.org/movie/{movie['id']}"
+                            'id': int(movie_id),
+                            'title': str(movie.get('title', 'Unknown Title')),
+                            'description': description,
+                            'image': f"https://image.tmdb.org/t/p/w500{poster_path}",
+                            'rating': float(movie.get('vote_average', 0)),
+                            'release_date': str(movie.get('release_date', 'N/A')),
+                            'url': f"https://www.themoviedb.org/movie/{movie_id}"
                         })
+                
+                print(f"✅ Processed {len(movies)} movies from {user_language}")
         
-        print(f"\n✅ Total movies found: {len(movies)}")
+        except Exception as e:
+            print(f"⚠️ Error fetching {user_language} movies: {type(e).__name__}: {e}")
+        
+        # Add English movies if needed
+        if len(movies) < 8:
+            print(f"\n🔍 Adding English movies (current count: {len(movies)})...")
+            params['with_original_language'] = 'en'
+            
+            try:
+                response = requests.get(discover_url, params=params, timeout=10)
+                print(f"📊 English movie search status: {response.status_code}")
+                
+                if response.status_code == 200:
+                    data_resp = response.json()
+                    results = data_resp.get('results', [])
+                    print(f"📦 Found {len(results)} English movies")
+                    
+                    existing_ids = {m['id'] for m in movies}
+                    
+                    for movie in results[:15]:
+                        if not movie or not isinstance(movie, dict):
+                            continue
+                        
+                        movie_id = movie.get('id')
+                        poster_path = movie.get('poster_path')
+                        
+                        if movie_id and poster_path and movie_id not in existing_ids:
+                            overview = movie.get('overview', '')
+                            description = (overview[:200] + '...') if len(overview) > 200 else (overview or 'No description')
+                            
+                            movies.append({
+                                'id': int(movie_id),
+                                'title': str(movie.get('title', 'Unknown Title')),
+                                'description': description,
+                                'image': f"https://image.tmdb.org/t/p/w500{poster_path}",
+                                'rating': float(movie.get('vote_average', 0)),
+                                'release_date': str(movie.get('release_date', 'N/A')),
+                                'url': f"https://www.themoviedb.org/movie/{movie_id}"
+                            })
+                    
+                    print(f"✅ Total movies after adding English: {len(movies)}")
+            
+            except Exception as e:
+                print(f"⚠️ Error fetching English movies: {type(e).__name__}: {e}")
+        
+        print(f"\n✅ FINAL: Returning {len(movies)} movies")
+        print(f"🎬 === MOVIE RECOMMENDATION END ===\n")
         
         return jsonify({
             'success': True,
             'emotion': emotion,
-            'genres': user_movie_genres,
-            'user_preference': user_preference_text,
             'recommendations': movies[:10],
             'language': user_language,
             'timestamp': get_utc_timestamp()
         })
         
     except Exception as e:
-        print(f"❌ Movie error: {e}")
+        print(f"\n❌ CRITICAL ERROR in get_movie_recommendations:")
+        print(f"   Error type: {type(e).__name__}")
+        print(f"   Error message: {str(e)}")
         import traceback
         traceback.print_exc()
+        
         return jsonify({
-            'success': False, 
-            'error': str(e),
+            'success': False,
+            'error': f'Internal server error: {str(e)}',
+            'error_type': type(e).__name__,
             'timestamp': get_utc_timestamp()
         }), 500
 
 
 @app.route('/api/recommendations/books', methods=['POST'])
 def get_book_recommendations():
-    """Get book recommendations - FIXED TO MATCH MUSIC ENDPOINT"""
+    """Get book recommendations"""
     data = request.json
     emotion = data.get('emotion', 'neutral')
     user_id = data.get('user_id')
@@ -1204,18 +1258,16 @@ def get_book_recommendations():
     print(f"Emotion: {emotion}, User: {user_id}")
     
     try:
-        # Get user language
         user_language = get_user_language(user_id) if user_id and user_id != 'guest_user' else 'English'
         print(f"🌍 Language: {user_language}")
         
-        # Get language config
         lang_config = get_language_config(user_language)
         lang_code = lang_config['lang_code']
         
-        # Get user's EXACT preference from database
-        user_preference_text = get_user_preferences_for_emotion(user_id, emotion) if user_id and user_id != 'guest_user' else None
+        # Get user preferences from new structure
+        preferences = get_user_preferences(user_id) if user_id and user_id != 'guest_user' else None
         
-        if not user_preference_text:
+        if not preferences:
             print("⚠️ No user preferences found")
             return jsonify({
                 'success': True,
@@ -1226,65 +1278,27 @@ def get_book_recommendations():
                 'timestamp': get_utc_timestamp()
             })
         
-        # Extract genres from user's response (same as music)
-        extracted = extract_genres_from_user_response(user_preference_text)
-        if not extracted or not extracted.get('books'):
-            print("❌ Could not extract book genres")
-            # Fallback: try to get second item from comma-separated
-            parts = user_preference_text.split(',')
-            user_book_genres = [parts[1].strip()] if len(parts) >= 2 else ['fiction']
-        else:
-            user_book_genres = extracted['books']
+        # Get book preference for this emotion
+        book_pref = preferences.get(f'{emotion}_books', '')
         
-        print(f"📖 Book genres: {user_book_genres}")
+        if not book_pref:
+            print(f"⚠️ No book preference for {emotion}")
+            return jsonify({
+                'success': True,
+                'emotion': emotion,
+                'recommendations': [],
+                'message': 'Please set your preferences in settings',
+                'language': user_language
+            })
+        
+        print(f"📖 Book preference: {book_pref}")
         
         books = []
         search_url = 'https://www.googleapis.com/books/v1/volumes'
         
-        # Search with language + genres (like music does)
-        print(f"\n🔍 Searching {user_language} books...")
-        
-        for user_genre in user_book_genres[:3]:
-            # Search with language-specific terms
-            if lang_config['book_terms']:
-                for lang_term in lang_config['book_terms'][:2]:
-                    search_query = f'{lang_term} {user_genre}'
-                    print(f"   Query: {search_query}")
-                    
-                    params = {
-                        'q': search_query,
-                        'langRestrict': lang_code,
-                        'orderBy': 'relevance',
-                        'maxResults': 10
-                    }
-                    
-                    if GOOGLE_BOOKS_API_KEY:
-                        params['key'] = GOOGLE_BOOKS_API_KEY
-                    
-                    response = requests.get(search_url, params=params)
-                    
-                    if response.status_code == 200:
-                        data_resp = response.json()
-                        for item in data_resp.get('items', []):
-                            volume_info = item.get('volumeInfo', {})
-                            book_id = item['id']
-                            
-                            if book_id not in [b['id'] for b in books]:
-                                books.append({
-                                    'id': book_id,
-                                    'title': volume_info.get('title', 'Unknown'),
-                                    'authors': volume_info.get('authors', ['Unknown']),
-                                    'description': (volume_info.get('description', 'No description')[:200] + '...') if volume_info.get('description') else 'No description',
-                                    'image': volume_info.get('imageLinks', {}).get('thumbnail'),
-                                    'rating': volume_info.get('averageRating', 0),
-                                    'categories': volume_info.get('categories', []),
-                                    'url': volume_info.get('infoLink', '#'),
-                                    'language': volume_info.get('language', lang_code)
-                                })
-                                print(f"      ✅ {volume_info.get('title', 'Unknown')}")
-            
-            # Also search with just the genre (like music does)
-            search_query = f'subject:{user_genre}'
+        # Search with language-specific terms
+        for lang_term in lang_config['book_terms'][:2]:
+            search_query = f'{lang_term} {book_pref}'
             print(f"   Query: {search_query}")
             
             params = {
@@ -1318,48 +1332,78 @@ def get_book_recommendations():
                             'language': volume_info.get('language', lang_code)
                         })
         
-        # Add English books if needed (like music does)
-        if len(books) < 8:
-            print(f"\n🔍 Adding English books (currently have {len(books)})...")
-            for user_genre in user_book_genres[:2]:
-                params = {
-                    'q': f'subject:{user_genre}',
-                    'langRestrict': 'en',
-                    'orderBy': 'relevance',
-                    'maxResults': 10
-                }
-                
-                if GOOGLE_BOOKS_API_KEY:
-                    params['key'] = GOOGLE_BOOKS_API_KEY
-                
-                response = requests.get(search_url, params=params)
-                
-                if response.status_code == 200:
-                    data_resp = response.json()
-                    for item in data_resp.get('items', []):
-                        volume_info = item.get('volumeInfo', {})
-                        book_id = item['id']
-                        
-                        if book_id not in [b['id'] for b in books]:
-                            books.append({
-                                'id': book_id,
-                                'title': volume_info.get('title', 'Unknown'),
-                                'authors': volume_info.get('authors', ['Unknown']),
-                                'description': (volume_info.get('description', 'No description')[:200] + '...') if volume_info.get('description') else 'No description',
-                                'image': volume_info.get('imageLinks', {}).get('thumbnail'),
-                                'rating': volume_info.get('averageRating', 0),
-                                'categories': volume_info.get('categories', []),
-                                'url': volume_info.get('infoLink', '#'),
-                                'language': 'en'
-                            })
+        # Search with just genre
+        search_query = f'subject:{book_pref}'
+        params = {
+            'q': search_query,
+            'langRestrict': lang_code,
+            'orderBy': 'relevance',
+            'maxResults': 10
+        }
         
-        print(f"\n✅ Total books found: {len(books)}")
+        if GOOGLE_BOOKS_API_KEY:
+            params['key'] = GOOGLE_BOOKS_API_KEY
+        
+        response = requests.get(search_url, params=params)
+        
+        if response.status_code == 200:
+            data_resp = response.json()
+            for item in data_resp.get('items', []):
+                volume_info = item.get('volumeInfo', {})
+                book_id = item['id']
+                
+                if book_id not in [b['id'] for b in books]:
+                    books.append({
+                        'id': book_id,
+                        'title': volume_info.get('title', 'Unknown'),
+                        'authors': volume_info.get('authors', ['Unknown']),
+                        'description': (volume_info.get('description', 'No description')[:200] + '...') if volume_info.get('description') else 'No description',
+                        'image': volume_info.get('imageLinks', {}).get('thumbnail'),
+                        'rating': volume_info.get('averageRating', 0),
+                        'categories': volume_info.get('categories', []),
+                        'url': volume_info.get('infoLink', '#'),
+                        'language': volume_info.get('language', lang_code)
+                    })
+        
+        # Add English books if needed
+        if len(books) < 8:
+            print(f"\n🔍 Adding English books...")
+            params = {
+                'q': f'subject:{book_pref}',
+                'langRestrict': 'en',
+                'orderBy': 'relevance',
+                'maxResults': 10
+            }
+            
+            if GOOGLE_BOOKS_API_KEY:
+                params['key'] = GOOGLE_BOOKS_API_KEY
+            
+            response = requests.get(search_url, params=params)
+            
+            if response.status_code == 200:
+                data_resp = response.json()
+                for item in data_resp.get('items', []):
+                    volume_info = item.get('volumeInfo', {})
+                    book_id = item['id']
+                    
+                    if book_id not in [b['id'] for b in books]:
+                        books.append({
+                            'id': book_id,
+                            'title': volume_info.get('title', 'Unknown'),
+                            'authors': volume_info.get('authors', ['Unknown']),
+                            'description': (volume_info.get('description', 'No description')[:200] + '...') if volume_info.get('description') else 'No description',
+                            'image': volume_info.get('imageLinks', {}).get('thumbnail'),
+                            'rating': volume_info.get('averageRating', 0),
+                            'categories': volume_info.get('categories', []),
+                            'url': volume_info.get('infoLink', '#'),
+                            'language': 'en'
+                        })
+        
+        print(f"\n✅ Total books: {len(books)}")
         
         return jsonify({
             'success': True,
             'emotion': emotion,
-            'genres': user_book_genres,
-            'user_preference': user_preference_text,
             'recommendations': books[:10],
             'language': user_language,
             'timestamp': get_utc_timestamp()
@@ -1393,12 +1437,11 @@ def health_check():
 
 if __name__ == '__main__':
     print("\n" + "="*60)
-    print("🚀 EMOTION RECOMMENDATION API - FIXED VERSION")
+    print("🚀 EMOTION RECOMMENDATION API - UPDATED VERSION")
     print("="*60)
-    print(f"✅ FIXED: Gemini model name (gemini-1.5-flash-latest)")
-    print(f"✅ Uses USER'S EXACT preferences from database")
-    print(f"✅ Supports: Tamil, Hindi, Telugu, Malayalam, Kannada, Marathi, Bengali, Punjabi, Spanish, French")
-    print(f"✅ Multi-language support based on stored user preferences")
-    print(f"✅ Fallback parsing if Gemini extraction fails")
+    print(f"✅ New database structure (emotion columns)")
+    print(f"✅ Settings page support")
+    print(f"✅ Profile-based preferences")
+    print(f"✅ Multi-language support")
     print("="*60 + "\n")
-    app.run(debug=True, port=5000)
+    app.run(debug=True, port=3000)
