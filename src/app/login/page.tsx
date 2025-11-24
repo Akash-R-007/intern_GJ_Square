@@ -36,18 +36,30 @@ export default function LoginPage() {
       }
 
       if (data.user) {
-        // Check if user has completed onboarding
-        const { data: profile } = await supabase
+        console.log('✅ User logged in:', data.user.id);
+        
+        const { data: profile, error: profileError } = await supabase
           .from('user_profiles')
-          .select('is_onboarded')
+          .select('is_onboarded, neutral_music, happy_music')
           .eq('id', data.user.id)
-          .single();
+          .maybeSingle();
 
-        if (profile && profile.is_onboarded) {
-          // User has completed onboarding, go to main page
-          router.push('/');
+        console.log('📊 Profile data:', profile);
+
+        if (profileError || !profile) {
+          console.log('⚠️ Profile not found, redirecting to onboarding');
+          router.push('/onboarding');
+          return;
+        }
+
+        const hasPreferences = profile.neutral_music || profile.happy_music;
+        const isOnboarded = profile.is_onboarded === true;
+
+        if (isOnboarded && hasPreferences) {
+          console.log('✅ User already onboarded, redirecting to dashboard');
+          router.push('/dashboard');
         } else {
-          // New user, redirect to onboarding
+          console.log('⚠️ User not onboarded, redirecting to onboarding');
           router.push('/onboarding');
         }
       }
@@ -62,9 +74,7 @@ export default function LoginPage() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-purple-50 via-blue-50 to-pink-50 flex items-center justify-center p-4">
       <div className="w-full max-w-md">
-        {/* Card */}
         <div className="bg-white rounded-2xl shadow-2xl p-8">
-          {/* Header */}
           <div className="text-center mb-8">
             <div className="inline-flex items-center justify-center w-16 h-16 bg-gradient-to-br from-purple-500 to-blue-500 rounded-full mb-4">
               <Lock className="w-8 h-8 text-white" />
@@ -73,7 +83,6 @@ export default function LoginPage() {
             <p className="text-gray-600">Sign in to continue to your account</p>
           </div>
 
-          {/* Error Message */}
           {error && (
             <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg flex items-start gap-3">
               <AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
@@ -81,9 +90,7 @@ export default function LoginPage() {
             </div>
           )}
 
-          {/* Form */}
           <form onSubmit={handleLogin} className="space-y-6">
-            {/* Email Input */}
             <div>
               <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-2">
                 Email Address
@@ -104,7 +111,6 @@ export default function LoginPage() {
               </div>
             </div>
 
-            {/* Password Input */}
             <div>
               <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-2">
                 Password
@@ -136,7 +142,6 @@ export default function LoginPage() {
               </div>
             </div>
 
-            {/* Login Button */}
             <button
               type="submit"
               disabled={isLoading}
@@ -153,7 +158,6 @@ export default function LoginPage() {
             </button>
           </form>
 
-          {/* Divider */}
           <div className="mt-6 mb-6">
             <div className="relative">
               <div className="absolute inset-0 flex items-center">
@@ -165,7 +169,6 @@ export default function LoginPage() {
             </div>
           </div>
 
-          {/* Signup Link */}
           <Link
             href="/signup"
             className="block w-full text-center py-3 px-4 border-2 border-purple-600 text-purple-600 rounded-lg font-semibold hover:bg-purple-50 transition-all duration-200"
@@ -174,7 +177,6 @@ export default function LoginPage() {
           </Link>
         </div>
 
-        {/* Footer */}
         <p className="text-center mt-6 text-sm text-gray-600">
           By continuing, you agree to our Terms of Service and Privacy Policy
         </p>
