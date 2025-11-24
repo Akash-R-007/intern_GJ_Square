@@ -4,9 +4,7 @@ import { useState, useEffect, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
 import { 
   Camera, 
-  MessageCircle, 
   X, 
-  Send, 
   Smile, 
   Frown, 
   Meh,
@@ -19,18 +17,19 @@ import {
   VideoOff,
   ExternalLink,
   Star,
-  AlertCircle
+  AlertCircle,
+  User,
+  Settings,
+  LogOut,
+  ChevronDown,
+  Save,
+  ArrowLeft
 } from 'lucide-react';
 
 interface EmotionData {
   emotion: string;
   confidence: number;
   timestamp: Date;
-}
-
-interface ChatMessage {
-  role: 'user' | 'bot';
-  content: string;
 }
 
 interface MusicRecommendation {
@@ -63,17 +62,46 @@ interface BookRecommendation {
   url: string;
 }
 
+interface UserPreferences {
+  preferred_language: string;
+  happy_music: string;
+  happy_books: string;
+  happy_movies: string;
+  sad_music: string;
+  sad_books: string;
+  sad_movies: string;
+  angry_music: string;
+  angry_books: string;
+  angry_movies: string;
+  fear_music: string;
+  fear_books: string;
+  fear_movies: string;
+  neutral_music: string;
+  neutral_books: string;
+  neutral_movies: string;
+}
+
 export default function DashboardPage() {
   const [userId, setUserId] = useState<string>('');
   const [isUserLoaded, setIsUserLoaded] = useState(false);
   const [currentEmotion, setCurrentEmotion] = useState<EmotionData | null>(null);
   const [isDetecting, setIsDetecting] = useState(false);
-  const [isChatOpen, setIsChatOpen] = useState(false);
-  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
-  const [chatInput, setChatInput] = useState('');
-  const [isChatLoading, setIsChatLoading] = useState(false);
   const [emotionHistory, setEmotionHistory] = useState<EmotionData[]>([]);
   const [error, setError] = useState<string>('');
+  
+  // Profile dropdown and settings state
+  const [showProfileMenu, setShowProfileMenu] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+  const [userPreferences, setUserPreferences] = useState<UserPreferences>({
+    preferred_language: 'English',
+    happy_music: '', happy_books: '', happy_movies: '',
+    sad_music: '', sad_books: '', sad_movies: '',
+    angry_music: '', angry_books: '', angry_movies: '',
+    fear_music: '', fear_books: '', fear_movies: '',
+    neutral_music: '', neutral_books: '', neutral_movies: ''
+  });
+  const [isSavingSettings, setIsSavingSettings] = useState(false);
+  const [settingsMessage, setSettingsMessage] = useState('');
   
   // Recommendations state
   const [musicRecs, setMusicRecs] = useState<MusicRecommendation[]>([]);
@@ -86,6 +114,7 @@ export default function DashboardPage() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const detectionIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const profileMenuRef = useRef<HTMLDivElement>(null);
 
   // Get user session first
   useEffect(() => {
@@ -100,6 +129,9 @@ export default function DashboardPage() {
     if (isUserLoaded && userId) {
       console.log('✅ User loaded, fetching initial recommendations for neutral mood');
       loadRecommendations('neutral');
+      if (userId !== 'guest_user') {
+        loadUserPreferences();
+      }
     }
   }, [isUserLoaded, userId]);
 
@@ -110,6 +142,18 @@ export default function DashboardPage() {
       loadRecommendations(currentEmotion.emotion);
     }
   }, [currentEmotion?.emotion]);
+
+  // Close profile menu when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (profileMenuRef.current && !profileMenuRef.current.contains(event.target as Node)) {
+        setShowProfileMenu(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   const getUserSession = async () => {
     try {
@@ -163,6 +207,63 @@ export default function DashboardPage() {
       }
     } catch (error) {
       console.error('Error loading emotion history:', error);
+    }
+  };
+
+  const loadUserPreferences = async () => {
+    if (!userId || userId === 'guest_user') return;
+
+    try {
+      const response = await fetch('http://localhost:5000/api/preferences/get-all', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: userId }),
+      });
+      
+      const data = await response.json();
+      if (data.success && data.preferences) {
+        setUserPreferences(data.preferences);
+      }
+    } catch (error) {
+      console.error('Error loading preferences:', error);
+    }
+  };
+
+  const saveUserPreferences = async () => {
+    if (!userId || userId === 'guest_user') {
+      setSettingsMessage('❌ Please login to save preferences');
+      return;
+    }
+
+    setIsSavingSettings(true);
+    setSettingsMessage('');
+
+    try {
+      const response = await fetch('http://localhost:5000/api/preferences/update-all', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          user_id: userId,
+          preferences: userPreferences
+        }),
+      });
+      
+      const data = await response.json();
+      if (data.success) {
+        setSettingsMessage('✅ Preferences saved successfully!');
+        // Reload recommendations for current emotion
+        if (currentEmotion) {
+          loadRecommendations(currentEmotion.emotion);
+        }
+        setTimeout(() => setSettingsMessage(''), 3000);
+      } else {
+        setSettingsMessage('❌ Failed to save preferences');
+      }
+    } catch (error) {
+      console.error('Error saving preferences:', error);
+      setSettingsMessage('❌ Error saving preferences');
+    } finally {
+      setIsSavingSettings(false);
     }
   };
 
@@ -336,46 +437,6 @@ export default function DashboardPage() {
     }, 5000);
   };
 
-  const handleChatSubmit = async () => {
-    if (!chatInput.trim() || isChatLoading) return;
-
-    const userMessage: ChatMessage = { role: 'user', content: chatInput };
-    setChatMessages(prev => [...prev, userMessage]);
-    const messageToSend = chatInput;
-    setChatInput('');
-    setIsChatLoading(true);
-
-    try {
-      const response = await fetch('http://localhost:5000/api/chatbot/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          message: messageToSend,
-          user_id: userId
-        }),
-      });
-
-      const data = await response.json();
-
-      if (data.success) {
-        setChatMessages(prev => [...prev, { role: 'bot', content: data.response }]);
-      } else {
-        setChatMessages(prev => [...prev, { 
-          role: 'bot', 
-          content: 'Sorry, I encountered an error. Please try again.' 
-        }]);
-      }
-    } catch (error) {
-      console.error('Error in chat:', error);
-      setChatMessages(prev => [...prev, { 
-        role: 'bot', 
-        content: 'Sorry, I could not connect to the server. Please check if the backend is running.' 
-      }]);
-    } finally {
-      setIsChatLoading(false);
-    }
-  };
-
   const getEmotionIcon = (emotion: string) => {
     switch (emotion) {
       case 'happy': case 'surprise': return <Smile className="w-8 h-8" />;
@@ -409,22 +470,193 @@ export default function DashboardPage() {
     );
   }
 
+  // Settings Page
+  if (showSettings) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-purple-50 via-blue-50 to-pink-50">
+        <header className="bg-white shadow-sm">
+          <div className="max-w-7xl mx-auto px-4 py-4 flex justify-between items-center">
+            <button
+              onClick={() => setShowSettings(false)}
+              className="flex items-center gap-2 text-gray-600 hover:text-gray-800 transition-colors"
+            >
+              <ArrowLeft className="w-5 h-5" />
+              <span className="font-medium">Back to Dashboard</span>
+            </button>
+            <h1 className="text-2xl font-bold text-gray-800">User Settings</h1>
+            <div className="w-32"></div>
+          </div>
+        </header>
+
+        <div className="max-w-4xl mx-auto px-4 py-8">
+          <div className="bg-white rounded-2xl shadow-lg p-8">
+            <h2 className="text-2xl font-bold text-gray-800 mb-6">Your Preferences</h2>
+            
+            {/* Language Selection */}
+            <div className="mb-8 p-6 bg-purple-50 rounded-xl">
+              <label className="block text-sm font-semibold text-gray-700 mb-2">
+                Preferred Language
+              </label>
+              <select
+                value={userPreferences.preferred_language}
+                onChange={(e) => setUserPreferences(prev => ({
+                  ...prev,
+                  preferred_language: e.target.value
+                }))}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+              >
+                <option value="English">English</option>
+                <option value="Tamil">Tamil</option>
+                <option value="Hindi">Hindi</option>
+                <option value="Telugu">Telugu</option>
+                <option value="Malayalam">Malayalam</option>
+                <option value="Kannada">Kannada</option>
+                <option value="Spanish">Spanish</option>
+                <option value="French">French</option>
+                <option value="Marathi">Marathi</option>
+                <option value="Bengali">Bengali</option>
+                <option value="Punjabi">Punjabi</option>
+              </select>
+            </div>
+
+            {/* Emotion Preferences */}
+            <div className="space-y-6">
+              {['happy', 'sad', 'angry', 'fear', 'neutral'].map(emotion => (
+                <div key={emotion} className="border-b pb-6">
+                  <h3 className="text-lg font-semibold text-gray-800 capitalize mb-4 flex items-center gap-2">
+                    <div className={`w-3 h-3 rounded-full bg-gradient-to-br ${getEmotionColor(emotion)}`}></div>
+                    When feeling {emotion}
+                  </h3>
+                  
+                  <div className="grid md:grid-cols-3 gap-4">
+                    <div>
+                      <label className="block text-xs font-medium text-gray-600 mb-1">
+                        <Music className="w-3 h-3 inline mr-1" />
+                        Music Genre
+                      </label>
+                      <input
+                        type="text"
+                        value={userPreferences[`${emotion}_music` as keyof UserPreferences] || ''}
+                        onChange={(e) => setUserPreferences(prev => ({
+                          ...prev,
+                          [`${emotion}_music`]: e.target.value
+                        }))}
+                        placeholder="e.g., pop, rock"
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+                      />
+                    </div>
+                    
+                    <div>
+                      <label className="block text-xs font-medium text-gray-600 mb-1">
+                        <Book className="w-3 h-3 inline mr-1" />
+                        Book Type
+                      </label>
+                      <input
+                        type="text"
+                        value={userPreferences[`${emotion}_books` as keyof UserPreferences] || ''}
+                        onChange={(e) => setUserPreferences(prev => ({
+                          ...prev,
+                          [`${emotion}_books`]: e.target.value
+                        }))}
+                        placeholder="e.g., fiction, thriller"
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+                      />
+                    </div>
+                    
+                    <div>
+                      <label className="block text-xs font-medium text-gray-600 mb-1">
+                        <Film className="w-3 h-3 inline mr-1" />
+                        Movie Genre
+                      </label>
+                      <input
+                        type="text"
+                        value={userPreferences[`${emotion}_movies` as keyof UserPreferences] || ''}
+                        onChange={(e) => setUserPreferences(prev => ({
+                          ...prev,
+                          [`${emotion}_movies`]: e.target.value
+                        }))}
+                        placeholder="e.g., comedy, action"
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+                      />
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Save Button */}
+            <div className="mt-8 flex items-center justify-between">
+              {settingsMessage && (
+                <p className={`text-sm ${settingsMessage.includes('✅') ? 'text-green-600' : 'text-red-600'}`}>
+                  {settingsMessage}
+                </p>
+              )}
+              <button
+                onClick={saveUserPreferences}
+                disabled={isSavingSettings}
+                className="ml-auto bg-gradient-to-r from-purple-600 to-blue-600 text-white px-6 py-3 rounded-lg font-semibold hover:from-purple-700 hover:to-blue-700 transition-all flex items-center gap-2 disabled:opacity-50"
+              >
+                {isSavingSettings ? (
+                  <>
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                    Saving...
+                  </>
+                ) : (
+                  <>
+                    <Save className="w-5 h-5" />
+                    Save Changes
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Main Dashboard
   return (
     <div className="min-h-screen bg-gradient-to-br from-purple-50 via-blue-50 to-pink-50">
-      {/* Header */}
+      {/* Header with Profile Dropdown */}
       <header className="bg-white shadow-sm">
         <div className="max-w-7xl mx-auto px-4 py-4 flex justify-between items-center">
           <h1 className="text-2xl font-bold text-gray-800">Emotion Dashboard</h1>
-          <div className="flex items-center gap-4">
+          
+          <div className="relative" ref={profileMenuRef}>
             {userId && userId !== 'guest_user' ? (
               <>
-                <span className="text-sm text-gray-600">User: {userId.slice(0, 8)}...</span>
                 <button
-                  onClick={() => supabase.auth.signOut()}
-                  className="px-4 py-2 text-sm text-purple-600 hover:bg-purple-50 rounded-lg transition-all"
+                  onClick={() => setShowProfileMenu(!showProfileMenu)}
+                  className="flex items-center gap-2 px-4 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg transition-all"
                 >
-                  Logout
+                  <User className="w-5 h-5 text-gray-600" />
+                  <span className="text-sm text-gray-700">Profile</span>
+                  <ChevronDown className={`w-4 h-4 text-gray-600 transition-transform ${showProfileMenu ? 'rotate-180' : ''}`} />
                 </button>
+
+                {showProfileMenu && (
+                  <div className="absolute right-0 mt-2 w-48 bg-white rounded-lg shadow-xl border border-gray-200 py-2 z-50">
+                    <button
+                      onClick={() => {
+                        setShowSettings(true);
+                        setShowProfileMenu(false);
+                      }}
+                      className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 flex items-center gap-2"
+                    >
+                      <Settings className="w-4 h-4" />
+                      Settings
+                    </button>
+                    <hr className="my-2 border-gray-200" />
+                    <button
+                      onClick={() => supabase.auth.signOut()}
+                      className="w-full px-4 py-2 text-left text-sm text-red-600 hover:bg-red-50 flex items-center gap-2"
+                    >
+                      <LogOut className="w-4 h-4" />
+                      Logout
+                    </button>
+                  </div>
+                )}
               </>
             ) : (
               <span className="px-4 py-2 text-sm text-gray-600 bg-gray-100 rounded-lg">
@@ -745,79 +977,6 @@ export default function DashboardPage() {
           </div>
         </div>
       </div>
-
-      {/* Floating Chatbot Icon */}
-      {!isChatOpen && (
-        <button
-          onClick={() => setIsChatOpen(true)}
-          className="fixed bottom-6 right-6 bg-gradient-to-r from-purple-600 to-blue-600 text-white p-4 rounded-full shadow-lg hover:shadow-xl transition-all hover:scale-110 z-50"
-        >
-          <MessageCircle className="w-6 h-6" />
-        </button>
-      )}
-
-      {/* Chatbot Window */}
-      {isChatOpen && (
-        <div className="fixed bottom-6 right-6 w-96 h-[500px] bg-white rounded-2xl shadow-2xl flex flex-col z-50">
-          <div className="bg-gradient-to-r from-purple-600 to-blue-600 p-4 rounded-t-2xl flex justify-between items-center">
-            <h3 className="text-white font-semibold">AI Assistant</h3>
-            <button onClick={() => setIsChatOpen(false)} className="text-white hover:bg-white/20 p-1 rounded">
-              <X className="w-5 h-5" />
-            </button>
-          </div>
-
-          <div className="flex-1 overflow-y-auto p-4 space-y-3">
-            {chatMessages.length === 0 && (
-              <div className="text-center text-gray-500 mt-8">
-                <p className="mb-2">👋 Hi! I'm your AI assistant.</p>
-                <p className="text-xs">Try asking:</p>
-                <div className="text-xs text-left mt-2 space-y-1">
-                  <p>• "What are my preferences?"</p>
-                  <p>• "Recommend music for happy mood"</p>
-                  <p>• "I want to change my sad preferences"</p>
-                  <p>• "What should I watch when angry?"</p>
-                </div>
-              </div>
-            )}
-            {chatMessages.map((msg, idx) => (
-              <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                <div className={`max-w-[80%] p-3 rounded-lg ${
-                  msg.role === 'user' ? 'bg-purple-600 text-white' : 'bg-gray-100 text-gray-800'
-                }`}>
-                  <p className="text-sm">{msg.content}</p>
-                </div>
-              </div>
-            ))}
-            {isChatLoading && (
-              <div className="flex justify-start">
-                <div className="bg-gray-100 p-3 rounded-lg">
-                  <Loader2 className="w-5 h-5 animate-spin text-gray-500" />
-                </div>
-              </div>
-            )}
-          </div>
-
-          <div className="p-4 border-t">
-            <div className="flex gap-2">
-              <input
-                type="text"
-                value={chatInput}
-                onChange={(e) => setChatInput(e.target.value)}
-                onKeyPress={(e) => e.key === 'Enter' && handleChatSubmit()}
-                placeholder="Type a message..."
-                className="flex-1 px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
-              />
-              <button
-                onClick={handleChatSubmit}
-                disabled={!chatInput.trim() || isChatLoading}
-                className="bg-purple-600 text-white p-2 rounded-lg hover:bg-purple-700 disabled:opacity-50"
-              >
-                <Send className="w-5 h-5" />
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
