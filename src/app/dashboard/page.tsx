@@ -192,7 +192,7 @@ export default function DashboardPage() {
     }
     
     try {
-      const response = await fetch('http://localhost:5000/api/emotion/history', {
+      const response = await fetch('http://localhost:8000/api/emotion/history', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ user_id: uid }),
@@ -214,7 +214,7 @@ export default function DashboardPage() {
     if (!userId || userId === 'guest_user') return;
 
     try {
-      const response = await fetch('http://localhost:5000/api/preferences/get-all', {
+      const response = await fetch('http://localhost:8000/api/preferences/get-all', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ user_id: userId }),
@@ -239,7 +239,7 @@ export default function DashboardPage() {
     setSettingsMessage('');
 
     try {
-      const response = await fetch('http://localhost:5000/api/preferences/update-all', {
+      const response = await fetch('http://localhost:8000/api/preferences/update-all', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
@@ -282,7 +282,7 @@ export default function DashboardPage() {
     try {
       // Fetch music recommendations
       console.log('🎵 Fetching music...');
-      const musicRes = await fetch('http://localhost:5000/api/recommendations/music', {
+      const musicRes = await fetch('http://localhost:8000/api/recommendations/music', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ emotion, user_id: userId }),
@@ -305,7 +305,7 @@ export default function DashboardPage() {
 
       // Fetch movie recommendations
       console.log('🎬 Fetching movies...');
-      const movieRes = await fetch('http://localhost:5000/api/recommendations/movies', {
+      const movieRes = await fetch('http://localhost:8000/api/recommendations/movies', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ emotion, user_id: userId }),
@@ -328,7 +328,7 @@ export default function DashboardPage() {
 
       // Fetch book recommendations
       console.log('📚 Fetching books...');
-      const bookRes = await fetch('http://localhost:5000/api/recommendations/books', {
+      const bookRes = await fetch('http://localhost:8000/api/recommendations/books', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ emotion, user_id: userId }),
@@ -353,7 +353,7 @@ export default function DashboardPage() {
       
     } catch (error) {
       console.error('❌ Error loading recommendations:', error);
-      setRecsError('Could not load recommendations. Please check if the backend is running on http://localhost:5000');
+      setRecsError('Could not load recommendations. Please check if the backend is running on http://localhost:8000');
     } finally {
       setLoadingRecs(false);
     }
@@ -412,7 +412,7 @@ export default function DashboardPage() {
       if (!frame) return;
 
       try {
-        const response = await fetch('http://localhost:5000/api/emotion/detect', {
+        const response = await fetch('http://localhost:8000/api/emotion/detect', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -434,7 +434,7 @@ export default function DashboardPage() {
       } catch (error) {
         console.error('Error detecting emotion:', error);
       }
-    }, 5000);
+    }, 8000);
   };
 
   const getEmotionIcon = (emotion: string) => {
@@ -683,7 +683,7 @@ export default function DashboardPage() {
             <div>
               <p className="text-red-800 font-semibold">Error</p>
               <p className="text-red-700 text-sm">{error || recsError}</p>
-              <p className="text-red-600 text-xs mt-1">Make sure the Flask backend is running on http://localhost:5000</p>
+              <p className="text-red-600 text-xs mt-1">Make sure the Flask backend is running on http://localhost:8000</p>
             </div>
           </div>
         )}
